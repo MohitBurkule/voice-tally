@@ -333,7 +333,7 @@ const HelpPage: React.FC = () => {
                   className="flex items-center space-x-3 p-3 bg-muted/50 rounded-lg"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{, index * 0.1 }}
+                  transition={{ delay: index * 0.1 }}
                 >
                   {getResultIcon(result.status)}
                   <div className="flex-1">
