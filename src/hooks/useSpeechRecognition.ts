@@ -28,6 +28,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const shouldRestartRef = useRef(false);
+  const isStoppingRef = useRef(false);
 
   const browserSupportsSpeechRecognition = !!(
     typeof window !== 'undefined' &&
@@ -60,7 +62,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
   const checkForTargetWords = useCallback((spokenText: string) => {
     console.log('Checking spoken text:', spokenText);
-    const lowerText = spokenText.toLowerCase();
+    const lowerText = spokenText.toLowerCase().trim();
+    
+    // Don't process empty text
+    if (!lowerText) return;
     
     for (const targetWord of state.targetWords) {
       const allWords = [targetWord.word, ...targetWord.homophones].map(w => w.toLowerCase());
@@ -83,6 +88,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             }
           });
           
+          // Clear audio chunks after use
           audioChunksRef.current = [];
           return;
         }
@@ -91,6 +97,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   }, [state.targetWords, dispatch, playBeepSound]);
 
   const startAudioRecording = useCallback(async () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      console.log('Audio recording already active');
+      return;
+    }
+
     try {
       console.log('Starting audio recording...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -116,8 +127,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   }, [dispatch]);
 
   const stopAudioRecording = useCallback(() => {
-    console.log('Stopping audio recording...');
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      console.log('Stopping audio recording...');
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       dispatch({ type: 'SET_RECORDING', payload: false });
@@ -127,6 +138,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
   const startListening = useCallback(async () => {
     console.log('Start listening called');
+    
+    if (isListening || isStoppingRef.current) {
+      console.log('Already listening or stopping, ignoring start request');
+      return;
+    }
     
     if (!browserSupportsSpeechRecognition) {
       const errorMsg = 'Speech recognition is not supported in this browser';
@@ -152,6 +168,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const recognition = new SpeechRecognition();
     
     recognitionRef.current = recognition;
+    shouldRestartRef.current = true;
+    isStoppingRef.current = false;
     
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -172,25 +190,21 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     recognition.onresult = (event: any) => {
       console.log('Speech recognition result received');
       let finalTranscript = '';
-      let interimTranscript = '';
       
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcriptPart = event.results[i][0].transcript;
         
         if (event.results[i].isFinal) {
           finalTranscript += transcriptPart;
-        } else {
-          interimTranscript += transcriptPart;
         }
       }
       
-      const fullTranscript = finalTranscript || interimTranscript;
-      console.log('Transcript:', fullTranscript);
-      setTranscript(fullTranscript);
-      dispatch({ type: 'SET_TRANSCRIPT', payload: fullTranscript });
-      
-      if (finalTranscript) {
-        checkForTargetWords(finalTranscript);
+      const fullTranscript = finalTranscript.trim();
+      if (fullTranscript) {
+        console.log('Final transcript:', fullTranscript);
+        setTranscript(fullTranscript);
+        dispatch({ type: 'SET_TRANSCRIPT', payload: fullTranscript });
+        checkForTargetWords(fullTranscript);
       }
     };
     
@@ -199,30 +213,39 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       console.error(errorMessage, event);
       setError(errorMessage);
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
-      setIsListening(false);
-      dispatch({ type: 'SET_LISTENING', payload: false });
-      stopAudioRecording();
+      
+      // Don't restart on certain errors
+      if (event.error === 'aborted' || event.error === 'not-allowed') {
+        shouldRestartRef.current = false;
+      }
     };
     
     recognition.onend = () => {
-      console.log('Speech recognition ended');
-      setIsListening(false);
-      dispatch({ type: 'SET_LISTENING', payload: false });
-      stopAudioRecording();
+      console.log('Speech recognition ended, shouldRestart:', shouldRestartRef.current);
       
-      // Auto-restart if we're supposed to be listening (unless there was an error)
-      if (!error && recognitionRef.current) {
-        console.log('Auto-restarting speech recognition');
-        setTimeout(() => {
-          if (recognitionRef.current) {
-            try {
-              recognitionRef.current.start();
-            } catch (err) {
-              console.error('Error restarting recognition:', err);
-            }
-          }
-        }, 100);
+      if (!shouldRestartRef.current || isStoppingRef.current) {
+        console.log('Not restarting speech recognition');
+        setIsListening(false);
+        dispatch({ type: 'SET_LISTENING', payload: false });
+        stopAudioRecording();
+        return;
       }
+      
+      // Auto-restart after a short delay to prevent rapid cycling
+      setTimeout(() => {
+        if (shouldRestartRef.current && !isStoppingRef.current && recognitionRef.current) {
+          try {
+            console.log('Auto-restarting speech recognition');
+            recognitionRef.current.start();
+          } catch (err) {
+            console.error('Error restarting recognition:', err);
+            shouldRestartRef.current = false;
+            setIsListening(false);
+            dispatch({ type: 'SET_LISTENING', payload: false });
+            stopAudioRecording();
+          }
+        }
+      }, 500);
     };
     
     try {
@@ -234,17 +257,26 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       setError(errorMessage);
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
     }
-  }, [browserSupportsSpeechRecognition, dispatch, checkForTargetWords, startAudioRecording, stopAudioRecording, error]);
+  }, [browserSupportsSpeechRecognition, dispatch, checkForTargetWords, startAudioRecording, stopAudioRecording, isListening]);
 
   const stopListening = useCallback(() => {
     console.log('Stop listening called');
+    shouldRestartRef.current = false;
+    isStoppingRef.current = true;
+    
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
+    
     stopAudioRecording();
     setIsListening(false);
     dispatch({ type: 'SET_LISTENING', payload: false });
+    
+    // Reset stopping flag after a delay
+    setTimeout(() => {
+      isStoppingRef.current = false;
+    }, 1000);
   }, [stopAudioRecording, dispatch]);
 
   const resetTranscript = useCallback(() => {
@@ -255,6 +287,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      shouldRestartRef.current = false;
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
