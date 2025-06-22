@@ -13,10 +13,14 @@ const TallyPage: React.FC = () => {
     isListening, 
     startListening, 
     stopListening, 
-    browserSupportsSpeechRecognition 
+    browserSupportsSpeechRecognition,
+    error 
   } = useSpeechRecognition();
 
+  console.log('TallyPage render - isListening:', isListening, 'error:', error);
+
   const handleStartStop = () => {
+    console.log('Start/Stop button clicked, current state:', isListening);
     if (isListening) {
       stopListening();
     } else {
@@ -61,6 +65,12 @@ const TallyPage: React.FC = () => {
         <p className="text-muted-foreground">
           Start listening to automatically count your target words
         </p>
+        {/* Debug info */}
+        <div className="mt-2 text-xs text-muted-foreground">
+          Status: {isListening ? 'Listening' : 'Idle'} | 
+          Context Listening: {state.isListening ? 'Yes' : 'No'} |
+          Recording: {state.isRecording ? 'Yes' : 'No'}
+        </div>
       </motion.div>
 
       {/* Status Indicator */}
