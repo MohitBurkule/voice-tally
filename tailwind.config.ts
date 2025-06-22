@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,19 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				// Voice Tally specific colors
+				success: {
+					DEFAULT: '#10b981',
+					light: '#34d399'
+				},
+				warning: {
+					DEFAULT: '#f59e0b',
+					light: '#fbbf24'
+				},
+				listening: {
+					DEFAULT: '#3b82f6',
+					light: '#60a5fa'
 				}
 			},
 			borderRadius: {
@@ -84,11 +98,56 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'pulse-listening': {
+					'0%, 100%': {
+						transform: 'scale(1)',
+						opacity: '1'
+					},
+					'50%': {
+						transform: 'scale(1.05)',
+						opacity: '0.8'
+					}
+				},
+				'count-flip': {
+					'0%': {
+						transform: 'rotateX(0deg)'
+					},
+					'50%': {
+						transform: 'rotateX(90deg)'
+					},
+					'100%': {
+						transform: 'rotateX(0deg)'
+					}
+				},
+				'slide-in-right': {
+					'0%': {
+						transform: 'translateX(100%)',
+						opacity: '0'
+					},
+					'100%': {
+						transform: 'translateX(0)',
+						opacity: '1'
+					}
+				},
+				'fade-in-up': {
+					'0%': {
+						transform: 'translateY(20px)',
+						opacity: '0'
+					},
+					'100%': {
+						transform: 'translateY(0)',
+						opacity: '1'
+					}
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'pulse-listening': 'pulse-listening 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+				'count-flip': 'count-flip 0.6s ease-in-out',
+				'slide-in-right': 'slide-in-right 0.3s ease-out',
+				'fade-in-up': 'fade-in-up 0.5s ease-out'
 			}
 		}
 	},
