@@ -67,15 +67,24 @@ const checkForTargetWords = useCallback((spokenText: string) => {
   // Don't process empty text
   if (!lowerText) return;
   
-  // Track which words we've already processed to avoid double counting in a single transcript
-  const detectedWords = new Set<string>();
+  // Track which specific homophones we've already processed to avoid double counting the same homophone
+  const processedHomophones = new Set<string>();
   
   for (const targetWord of state.targetWords) {
     console.log('Checking target word:', { id: targetWord.id, word: targetWord.word, count: targetWord.count });
     const allWords = [targetWord.word, ...targetWord.homophones].map(w => w.toLowerCase());
+    console.log('Homophones:', allWords);
+    
+    let totalMatches = 0; // Count total matches for this target word across all its homophones
     
     for (const word of allWords) {
       console.log(`Checking for word: "${word}" in text: "${lowerText}"`);
+      
+      // Skip if we've already processed this specific homophone
+      if (processedHomophones.has(word)) {
+        console.log(`Skipping "${word}" - already processed`);
+        continue;
+      }
       
       // Try multiple matching strategies
       let matches = null;
@@ -98,30 +107,34 @@ const checkForTargetWords = useCallback((spokenText: string) => {
         }
       }
       
-      if (count > 0 && !detectedWords.has(targetWord.id)) {
+      if (count > 0) {
         console.log('Target word detected:', word, 'for target:', targetWord.word, 'with ID:', targetWord.id);
+        totalMatches += count;
         
-        // Increment for each occurrence
-        for (let i = 0; i < count; i++) {
-          playBeepSound();
-          
-          const currentAudioBlob = audioChunksRef.current.length > 0 
-            ? new Blob(audioChunksRef.current, { type: 'audio/webm' })
-            : undefined;
-          
-          dispatch({
-            type: 'INCREMENT_WORD',
-            payload: {
-              wordId: targetWord.id,
-              detectedWord: word,
-              audioBlob: currentAudioBlob
-            }
-          });
-        }
+        // Mark this specific homophone as processed
+        processedHomophones.add(word);
+      }
+    }
+    
+    // Dispatch increments for all matches found for this target word
+    if (totalMatches > 0) {
+      console.log(`Total matches for target "${targetWord.word}": ${totalMatches}`);
+      
+      for (let i = 0; i < totalMatches; i++) {
+        playBeepSound();
         
-        // Mark this target word as detected to avoid double counting
-        detectedWords.add(targetWord.id);
-        break; // Break from homophones loop, but continue checking other target words
+        const currentAudioBlob = audioChunksRef.current.length > 0 
+          ? new Blob(audioChunksRef.current, { type: 'audio/webm' })
+          : undefined;
+        
+        dispatch({
+          type: 'INCREMENT_WORD',
+          payload: {
+            wordId: targetWord.id,
+            detectedWord: targetWord.word, // Use the main target word for consistency
+            audioBlob: currentAudioBlob
+          }
+        });
       }
     }
   }
@@ -251,10 +264,11 @@ const checkForTargetWords = useCallback((spokenText: string) => {
       
       const fullTranscript = finalTranscript.trim();
       if (fullTranscript) {
-        console.log('Final transcript:', fullTranscript);
-        setTranscript(fullTranscript);
-        dispatch({ type: 'SET_TRANSCRIPT', payload: fullTranscript });
-        checkForTargetWords(fullTranscript);
+        const lowerTranscript = fullTranscript.toLowerCase();
+        console.log('Final transcript:', lowerTranscript);
+        setTranscript(lowerTranscript);
+        dispatch({type: 'SET_TRANSCRIPT', payload: lowerTranscript});
+        checkForTargetWords(lowerTranscript);
       }
     };
     
