@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useUndoRedo } from '../hooks/useUndoRedo';
@@ -85,6 +84,8 @@ type TallyAction =
   | { type: 'CLEAR_HISTORY' };
 
 function tallyReducer(state: TallyState, action: TallyAction): TallyState {
+  console.log('Reducer called with action:', action.type, action.payload);
+  
   switch (action.type) {
     case 'SET_LISTENING':
       return { ...state, isListening: action.payload };
@@ -99,23 +100,34 @@ function tallyReducer(state: TallyState, action: TallyAction): TallyState {
       return { ...state, error: action.payload };
     
     case 'INCREMENT_WORD': {
-      const newHistory: HistoryItem = {
-        id: Date.now().toString(),
-        word: state.targetWords.find(w => w.id === action.payload.wordId)?.word || '',
-        detectedWord: action.payload.detectedWord,
-        timestamp: new Date(),
-        audioBlob: action.payload.audioBlob
+      const { wordId, detectedWord, audioBlob } = action.payload;
+      
+      console.log('INCREMENT_WORD called with:', { wordId, detectedWord });
+      console.log('Current state before increment:', state.targetWords.map(w => ({ id: w.id, word: w.word, count: w.count })));
+      
+      const newState = {
+        ...state,
+        targetWords: state.targetWords.map(word => {
+          if (word.id === wordId) {
+            console.log(`Incrementing word "${word.word}" from ${word.count} to ${word.count + 1}`);
+            return { ...word, count: word.count + 1 };
+          }
+          return word;
+        }),
+        history: [
+          ...state.history,
+          {
+            id: Date.now().toString(),
+            wordId,
+            detectedWord,
+            timestamp: new Date(),
+            audioBlob
+          }
+        ]
       };
       
-      return {
-        ...state,
-        targetWords: state.targetWords.map(word =>
-          word.id === action.payload.wordId
-            ? { ...word, count: word.count + 1 }
-            : word
-        ),
-        history: [newHistory, ...state.history].slice(0, 100) // Keep last 100 items
-      };
+      console.log('New state after increment:', newState.targetWords.map(w => ({ id: w.id, word: w.word, count: w.count })));
+      return newState;
     }
     
     case 'DECREMENT_WORD':
@@ -218,16 +230,16 @@ export const TallyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [present.settings.theme]);
 
-  const wrappedDispatch = (action: TallyAction) => {
-    const newState = tallyReducer(present, action);
-    set(newState);
-  };
+  // Sync the undo/redo state with the reducer state
+  useEffect(() => {
+    set(state);
+  }, [state, set]);
 
   return (
     <TallyContext.Provider
       value={{
         state: present,
-        dispatch: wrappedDispatch,
+        dispatch, // Use the original dispatch, not wrappedDispatch
         undo,
         redo,
         canUndo,

@@ -1,13 +1,5 @@
-
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTally } from '../context/TallyContext';
-
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
 
 interface UseSpeechRecognitionReturn {
   isListening: boolean;
@@ -17,6 +9,13 @@ interface UseSpeechRecognitionReturn {
   stopListening: () => void;
   resetTranscript: () => void;
   browserSupportsSpeechRecognition: boolean;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
 }
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
@@ -30,6 +29,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const audioChunksRef = useRef<Blob[]>([]);
   const shouldRestartRef = useRef(false);
   const isStoppingRef = useRef(false);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const browserSupportsSpeechRecognition = !!(
     typeof window !== 'undefined' &&
@@ -60,19 +60,49 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     }
   }, [state.settings.soundEnabled]);
 
-  const checkForTargetWords = useCallback((spokenText: string) => {
-    console.log('Checking spoken text:', spokenText);
-    const lowerText = spokenText.toLowerCase().trim();
+const checkForTargetWords = useCallback((spokenText: string) => {
+  console.log('Checking spoken text:', spokenText);
+  const lowerText = spokenText.toLowerCase().trim();
+  
+  // Don't process empty text
+  if (!lowerText) return;
+  
+  // Track which words we've already processed to avoid double counting in a single transcript
+  const detectedWords = new Set<string>();
+  
+  for (const targetWord of state.targetWords) {
+    console.log('Checking target word:', { id: targetWord.id, word: targetWord.word, count: targetWord.count });
+    const allWords = [targetWord.word, ...targetWord.homophones].map(w => w.toLowerCase());
     
-    // Don't process empty text
-    if (!lowerText) return;
-    
-    for (const targetWord of state.targetWords) {
-      const allWords = [targetWord.word, ...targetWord.homophones].map(w => w.toLowerCase());
+    for (const word of allWords) {
+      console.log(`Checking for word: "${word}" in text: "${lowerText}"`);
       
-      for (const word of allWords) {
-        if (lowerText.includes(word)) {
-          console.log('Target word detected:', word);
+      // Try multiple matching strategies
+      let matches = null;
+      let count = 0;
+      
+      // Strategy 1: Word boundaries (most precise)
+      const wordBoundaryRegex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      matches = lowerText.match(wordBoundaryRegex);
+      
+      if (matches) {
+        count = matches.length;
+        console.log(`Found ${count} matches using word boundary for "${word}":`, matches);
+      } else {
+        // Strategy 2: Simple includes check (fallback for edge cases)
+        const simpleRegex = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        matches = lowerText.match(simpleRegex);
+        if (matches) {
+          count = matches.length;
+          console.log(`Found ${count} matches using simple regex for "${word}":`, matches);
+        }
+      }
+      
+      if (count > 0 && !detectedWords.has(targetWord.id)) {
+        console.log('Target word detected:', word, 'for target:', targetWord.word, 'with ID:', targetWord.id);
+        
+        // Increment for each occurrence
+        for (let i = 0; i < count; i++) {
           playBeepSound();
           
           const currentAudioBlob = audioChunksRef.current.length > 0 
@@ -87,14 +117,18 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
               audioBlob: currentAudioBlob
             }
           });
-          
-          // Clear audio chunks after use
-          audioChunksRef.current = [];
-          return;
         }
+        
+        // Mark this target word as detected to avoid double counting
+        detectedWords.add(targetWord.id);
+        break; // Break from homophones loop, but continue checking other target words
       }
     }
-  }, [state.targetWords, dispatch, playBeepSound]);
+  }
+  
+  // Clear audio chunks after processing all words
+  audioChunksRef.current = [];
+}, [state.targetWords, dispatch, playBeepSound]);
 
   const startAudioRecording = useCallback(async () => {
     if (mediaRecorderRef.current?.state === 'recording') {
@@ -164,6 +198,22 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       return;
     }
 
+    // Clean up any existing recognition first
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.log('Error stopping existing recognition:', err);
+      }
+      recognitionRef.current = null;
+    }
+
+    // Clear any pending restart timeout
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     
@@ -217,35 +267,44 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       // Don't restart on certain errors
       if (event.error === 'aborted' || event.error === 'not-allowed') {
         shouldRestartRef.current = false;
+        console.log('Setting shouldRestart to false due to error:', event.error);
       }
     };
     
     recognition.onend = () => {
-      console.log('Speech recognition ended, shouldRestart:', shouldRestartRef.current);
+      console.log('Speech recognition ended, shouldRestart:', shouldRestartRef.current, 'isStopping:', isStoppingRef.current);
       
-      if (!shouldRestartRef.current || isStoppingRef.current) {
-        console.log('Not restarting speech recognition');
-        setIsListening(false);
-        dispatch({ type: 'SET_LISTENING', payload: false });
-        stopAudioRecording();
-        return;
-      }
+      // Always update the listening state first
+      setIsListening(false);
+      dispatch({ type: 'SET_LISTENING', payload: false });
+      stopAudioRecording();
       
-      // Auto-restart after a short delay to prevent rapid cycling
-      setTimeout(() => {
-        if (shouldRestartRef.current && !isStoppingRef.current && recognitionRef.current) {
-          try {
-            console.log('Auto-restarting speech recognition');
-            recognitionRef.current.start();
-          } catch (err) {
-            console.error('Error restarting recognition:', err);
-            shouldRestartRef.current = false;
-            setIsListening(false);
-            dispatch({ type: 'SET_LISTENING', payload: false });
-            stopAudioRecording();
+      // Only restart if we should and we're not manually stopping
+      if (shouldRestartRef.current && !isStoppingRef.current) {
+        console.log('Scheduling speech recognition restart');
+        restartTimeoutRef.current = setTimeout(() => {
+          // Double-check conditions before restarting
+          if (shouldRestartRef.current && !isStoppingRef.current && recognitionRef.current) {
+            try {
+              console.log('Auto-restarting speech recognition');
+              recognitionRef.current.start();
+            } catch (err) {
+              console.error('Error restarting recognition:', err);
+              shouldRestartRef.current = false;
+              setIsListening(false);
+              dispatch({ type: 'SET_LISTENING', payload: false });
+              recognitionRef.current = null;
+            }
+          } else {
+            console.log('Not restarting - conditions changed');
+            recognitionRef.current = null;
           }
-        }
-      }, 500);
+          restartTimeoutRef.current = null;
+        }, 500);
+      } else {
+        console.log('Not restarting speech recognition');
+        recognitionRef.current = null;
+      }
     };
     
     try {
@@ -256,6 +315,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       console.error(errorMessage);
       setError(errorMessage);
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      
+      setIsListening(false);
+      dispatch({ type: 'SET_LISTENING', payload: false });
+      recognitionRef.current = null;
     }
   }, [browserSupportsSpeechRecognition, dispatch, checkForTargetWords, startAudioRecording, stopAudioRecording, isListening]);
 
@@ -264,18 +327,33 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     shouldRestartRef.current = false;
     isStoppingRef.current = true;
     
+    // Clear any pending restart
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+    
+    // Stop recognition if it exists
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.log('Error stopping recognition:', err);
+      }
       recognitionRef.current = null;
     }
     
+    // Stop audio recording
     stopAudioRecording();
+    
+    // Update state
     setIsListening(false);
     dispatch({ type: 'SET_LISTENING', payload: false });
     
     // Reset stopping flag after a delay
     setTimeout(() => {
       isStoppingRef.current = false;
+      console.log('Reset stopping flag');
     }, 1000);
   }, [stopAudioRecording, dispatch]);
 
@@ -284,16 +362,32 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     dispatch({ type: 'SET_TRANSCRIPT', payload: '' });
   }, [dispatch]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount - using empty dependency array to prevent re-creation
   useEffect(() => {
     return () => {
+      console.log('Component unmounting - cleaning up');
       shouldRestartRef.current = false;
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+        restartTimeoutRef.current = null;
       }
-      stopAudioRecording();
+      
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (err) {
+          console.log('Error stopping recognition during cleanup:', err);
+        }
+        recognitionRef.current = null;
+      }
+      
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
     };
-  }, [stopAudioRecording]);
+  }, []); // Empty dependency array to prevent re-creation
 
   return {
     isListening,
