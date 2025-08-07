@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Plus, Minus, RotateCcw, TrendingUp, Volume2 } from 'lucide-react';
 import { TargetWord } from '../context/TallyContext';
 import { useTally } from '../context/TallyContext';
@@ -52,14 +52,13 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
     dispatch({ type: 'RESET_WORD', payload: word.id });
   };
 
-  const cardVariants = {
+  const cardVariants: Variants = {
     hidden: { opacity: 0, y: 50, scale: 0.9 },
     visible: { 
       opacity: 1, 
       y: 0, 
       scale: 1,
       transition: {
-        duration: 0.6,
         delay: index * 0.1,
         type: "spring",
         stiffness: 100
@@ -69,7 +68,6 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
       y: -8, 
       scale: 1.02,
       transition: {
-        duration: 0.3,
         type: "spring",
         stiffness: 400
       }

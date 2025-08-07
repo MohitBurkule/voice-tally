@@ -85,7 +85,7 @@ type TallyAction =
   | { type: 'CLEAR_HISTORY' };
 
 function tallyReducer(state: TallyState, action: TallyAction): TallyState {
-  console.log('Reducer called with action:', action.type, action.payload);
+  console.log('Reducer called with action:', action);
   
   switch (action.type) {
     case 'SET_LISTENING':
