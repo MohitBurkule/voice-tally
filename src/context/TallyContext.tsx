@@ -12,6 +12,7 @@ export interface TargetWord {
 
 export interface HistoryItem {
   id: string;
+  wordId: string;
   word: string;
   detectedWord: string;
   timestamp: Date;
@@ -105,6 +106,12 @@ function tallyReducer(state: TallyState, action: TallyAction): TallyState {
       console.log('INCREMENT_WORD called with:', { wordId, detectedWord });
       console.log('Current state before increment:', state.targetWords.map(w => ({ id: w.id, word: w.word, count: w.count })));
       
+      const targetWord = state.targetWords.find(w => w.id === wordId);
+      if (!targetWord) {
+        console.error('Target word not found:', wordId);
+        return state;
+      }
+      
       const newState = {
         ...state,
         targetWords: state.targetWords.map(word => {
@@ -119,6 +126,7 @@ function tallyReducer(state: TallyState, action: TallyAction): TallyState {
           {
             id: Date.now().toString(),
             wordId,
+            word: targetWord.word,
             detectedWord,
             timestamp: new Date(),
             audioBlob
