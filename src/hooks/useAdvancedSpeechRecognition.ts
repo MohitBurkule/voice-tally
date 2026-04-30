@@ -61,6 +61,11 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
   // Persistent refs across renders + recognition cycles
   const recognitionRef = useRef<any>(null);
+  // Pre-warmed next instance — constructed in advance so the swap on onend
+  // is just a .start() call, eliminating construction time from the gap.
+  const nextRecognitionRef = useRef<any>(null);
+  const recognitionEndedAtRef = useRef<number>(0);
+  const restartCountRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -295,11 +300,21 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
     recognition.onstart = () => {
       restartAttemptsRef.current = 0;
-      lastResultAtRef.current = Date.now();
+      const now = Date.now();
+      lastResultAtRef.current = now;
       setIsListening(true);
       setErrorWithRef(null);
       dispatch({ type: 'SET_LISTENING', payload: true });
-      pushDebug('start', 'recognition started');
+
+      // Report the gap since previous end — useful for mobile diagnosis
+      // (Chrome Android often gives 200-800ms gaps; iOS Safari can be worse).
+      if (recognitionEndedAtRef.current > 0) {
+        const gap = now - recognitionEndedAtRef.current;
+        recognitionEndedAtRef.current = 0;
+        pushDebug('start', `started (gap ${gap}ms, restart #${restartCountRef.current})`);
+      } else {
+        pushDebug('start', 'recognition started');
+      }
     };
 
     recognition.onresult = (event: any) => {
@@ -364,6 +379,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     };
 
     recognition.onend = () => {
+      recognitionEndedAtRef.current = Date.now();
       pushDebug('end', `active=${isActiveRef.current} err=${errorRef.current ?? '-'}`);
 
       if (!isActiveRef.current) {
@@ -378,7 +394,6 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
         return;
       }
 
-      pushDebug('restart', 'auto-restart');
       restartRecognitionRef.current();
     };
 
@@ -388,10 +403,9 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const restartRecognition = useCallback(() => {
     if (!isActiveRef.current || errorRef.current) return;
 
-    // Clear old instance reference
     recognitionRef.current = null;
+    restartCountRef.current += 1;
 
-    // Exponential backoff if we keep failing fast
     const attempts = restartAttemptsRef.current;
     const delay = attempts === 0 ? 0 : Math.min(50 * Math.pow(2, attempts - 1), 1000);
     restartAttemptsRef.current = attempts + 1;
@@ -399,14 +413,32 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     const fire = () => {
       if (!isActiveRef.current || errorRef.current) return;
       try {
-        const recognition = createRecognitionInstance();
+        // Use pre-warmed instance if available — saves construction time on the gap
+        const wasPrewarmed = !!nextRecognitionRef.current;
+        let recognition = nextRecognitionRef.current;
+        nextRecognitionRef.current = null;
+        if (!recognition) {
+          recognition = createRecognitionInstance();
+        }
         recognitionRef.current = recognition;
+        pushDebug('restart', wasPrewarmed ? 'restart (pre-warmed)' : 'restart (cold)');
         recognition.start();
+
+        // Pre-warm the next instance for the next restart cycle
+        setTimeout(() => {
+          if (isActiveRef.current && !errorRef.current && !nextRecognitionRef.current) {
+            try {
+              nextRecognitionRef.current = createRecognitionInstance();
+            } catch (_) {
+              // Ignore; we'll construct on demand
+            }
+          }
+        }, 200);
       } catch (err: any) {
-        // InvalidStateError can occur if start() is called before previous instance fully released
         const msg = String(err?.message || err);
         if (msg.includes('already started') || msg.includes('InvalidStateError')) {
-          // Schedule another attempt
+          // The pre-warmed instance was tainted; throw it away and retry fresh
+          nextRecognitionRef.current = null;
           restartTimeoutRef.current = setTimeout(fire, 150);
           return;
         }
@@ -423,12 +455,11 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     };
 
     if (delay === 0) {
-      // Use microtask-equivalent to let onend fully unwind
       Promise.resolve().then(fire);
     } else {
       restartTimeoutRef.current = setTimeout(fire, delay);
     }
-  }, [createRecognitionInstance, dispatch, setErrorWithRef]);
+  }, [createRecognitionInstance, dispatch, setErrorWithRef, pushDebug]);
 
   // Wire forward-declared ref
   useEffect(() => {
@@ -469,6 +500,9 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     dispatch({ type: 'SET_ERROR', payload: null });
     finalTranscriptRef.current = '';
     restartAttemptsRef.current = 0;
+    restartCountRef.current = 0;
+    recognitionEndedAtRef.current = 0;
+    nextRecognitionRef.current = null;
     lastResultAtRef.current = Date.now();
 
     try {
@@ -524,6 +558,8 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       try { recognitionRef.current.abort(); } catch (_) {}
       recognitionRef.current = null;
     }
+    // Discard any pre-warmed instance so it doesn't leak past stop
+    nextRecognitionRef.current = null;
 
     stopAudioRecording();
     setIsListening(false);
@@ -576,6 +612,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       if (watchdogTimeoutRef.current) clearInterval(watchdogTimeoutRef.current);
       try { recognitionRef.current?.abort(); } catch (_) {}
+      nextRecognitionRef.current = null;
       try {
         if (mediaRecorderRef.current?.state === 'recording') {
           mediaRecorderRef.current.stop();
