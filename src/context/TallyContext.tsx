@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, useMemo } from 'react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useUndoRedo } from '../hooks/useUndoRedo';
 
@@ -84,58 +84,57 @@ type TallyAction =
   | { type: 'UPDATE_SETTINGS'; payload: Partial<TallyState['settings']> }
   | { type: 'CLEAR_HISTORY' };
 
+let historyIdCounter = 0;
+const makeHistoryId = (): string => {
+  try {
+    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) {
+      return (crypto as any).randomUUID();
+    }
+  } catch (_) {}
+  historyIdCounter = (historyIdCounter + 1) % 1_000_000;
+  return `${Date.now()}-${historyIdCounter}`;
+};
+
 function tallyReducer(state: TallyState, action: TallyAction): TallyState {
-  console.log('Reducer called with action:', action);
-  
   switch (action.type) {
     case 'SET_LISTENING':
+      if (state.isListening === action.payload) return state;
       return { ...state, isListening: action.payload };
-    
+
     case 'SET_RECORDING':
+      if (state.isRecording === action.payload) return state;
       return { ...state, isRecording: action.payload };
-    
+
     case 'SET_TRANSCRIPT':
+      if (state.currentTranscript === action.payload) return state;
       return { ...state, currentTranscript: action.payload };
-    
+
     case 'SET_ERROR':
+      if (state.error === action.payload) return state;
       return { ...state, error: action.payload };
-    
+
     case 'INCREMENT_WORD': {
       const { wordId, detectedWord, audioBlob } = action.payload;
-      
-      console.log('INCREMENT_WORD called with:', { wordId, detectedWord });
-      console.log('Current state before increment:', state.targetWords.map(w => ({ id: w.id, word: w.word, count: w.count })));
-      
       const targetWord = state.targetWords.find(w => w.id === wordId);
-      if (!targetWord) {
-        console.error('Target word not found:', wordId);
-        return state;
-      }
-      
-      const newState = {
+      if (!targetWord) return state;
+
+      return {
         ...state,
-        targetWords: state.targetWords.map(word => {
-          if (word.id === wordId) {
-            console.log(`Incrementing word "${word.word}" from ${word.count} to ${word.count + 1}`);
-            return { ...word, count: word.count + 1 };
-          }
-          return word;
-        }),
+        targetWords: state.targetWords.map(word =>
+          word.id === wordId ? { ...word, count: word.count + 1 } : word
+        ),
         history: [
           ...state.history,
           {
-            id: Date.now().toString(),
+            id: makeHistoryId(),
             wordId,
             word: targetWord.word,
             detectedWord,
             timestamp: new Date(),
-            audioBlob
-          }
-        ]
+            audioBlob,
+          },
+        ],
       };
-      
-      console.log('New state after increment:', newState.targetWords.map(w => ({ id: w.id, word: w.word, count: w.count })));
-      return newState;
     }
     
     case 'DECREMENT_WORD':
@@ -219,14 +218,46 @@ interface TallyContextType {
 
 const TallyContext = createContext<TallyContextType | undefined>(undefined);
 
+// Runtime fields are not persisted and not part of undo/redo history.
+const RUNTIME_DEFAULTS = {
+  isListening: false,
+  isRecording: false,
+  currentTranscript: '',
+  error: null as string | null,
+};
+
+const hydrateState = (stored: Partial<TallyState> | null): TallyState => {
+  const base = stored && typeof stored === 'object'
+    ? { ...initialState, ...stored }
+    : { ...initialState };
+  // Always start fresh on runtime fields, regardless of what was stored
+  // (older versions of this app persisted runtime state)
+  return {
+    ...base,
+    ...RUNTIME_DEFAULTS,
+    history: Array.isArray(base.history)
+      // Date objects don't survive JSON.stringify — rehydrate them
+      ? base.history.map(h => ({ ...h, timestamp: new Date(h.timestamp) }))
+      : [],
+  };
+};
+
+const stripRuntime = (s: TallyState): Omit<TallyState, keyof typeof RUNTIME_DEFAULTS> => {
+  const { isListening, isRecording, currentTranscript, error, ...durable } = s;
+  return durable;
+};
+
 export const TallyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [storedState, setStoredState] = useLocalStorage('voiceTallyState', initialState);
-  const [state, dispatch] = useReducer(tallyReducer, storedState);
+  const [storedState, setStoredState] = useLocalStorage<Partial<TallyState>>(
+    'voiceTallyState',
+    stripRuntime(initialState),
+  );
+  const [state, dispatch] = useReducer(tallyReducer, storedState, hydrateState);
   const { present, undo, redo, canUndo, canRedo, set } = useUndoRedo(state);
 
-  // Update localStorage when state changes
+  // Persist only durable fields — runtime state is per-session
   useEffect(() => {
-    setStoredState(present);
+    setStoredState(stripRuntime(present));
   }, [present, setStoredState]);
 
   // Apply theme changes
@@ -238,20 +269,48 @@ export const TallyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [present.settings.theme]);
 
-  // Sync the undo/redo state with the reducer state
+  // Sync reducer state into undo/redo journal — but ONLY when durable fields
+  // change. Otherwise every interim transcript update would push a past entry,
+  // bloating memory + localStorage and making undo meaningless.
+  const lastDurableRef = useRef({
+    targetWords: state.targetWords,
+    history: state.history,
+    settings: state.settings,
+  });
   useEffect(() => {
-    set(state);
+    const changed =
+      state.targetWords !== lastDurableRef.current.targetWords ||
+      state.history !== lastDurableRef.current.history ||
+      state.settings !== lastDurableRef.current.settings;
+    if (changed) {
+      set(state);
+      lastDurableRef.current = {
+        targetWords: state.targetWords,
+        history: state.history,
+        settings: state.settings,
+      };
+    }
   }, [state, set]);
+
+  // Expose merged view: durable fields from undo/redo's `present`,
+  // runtime fields direct from reducer (so they're always live).
+  const exposedState: TallyState = useMemo(() => ({
+    ...present,
+    isListening: state.isListening,
+    isRecording: state.isRecording,
+    currentTranscript: state.currentTranscript,
+    error: state.error,
+  }), [present, state.isListening, state.isRecording, state.currentTranscript, state.error]);
 
   return (
     <TallyContext.Provider
       value={{
-        state: present,
-        dispatch, // Use the original dispatch, not wrappedDispatch
+        state: exposedState,
+        dispatch,
         undo,
         redo,
         canUndo,
-        canRedo
+        canRedo,
       }}
     >
       {children}
