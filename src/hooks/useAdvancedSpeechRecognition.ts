@@ -33,6 +33,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const isActiveRef = useRef(false);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const finalTranscriptRef = useRef('');
+  const errorRef = useRef<string | null>(null);
 
   const browserSupportsSpeechRecognition = !!(
     typeof window !== 'undefined' &&
@@ -149,125 +150,143 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     }
   }, [dispatch]);
 
+  const setErrorWithRef = useCallback((msg: string | null) => {
+    errorRef.current = msg;
+    setError(msg);
+    dispatch({ type: 'SET_ERROR', payload: msg });
+  }, [dispatch]);
+
+  const createRecognitionInstance = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 3;
+
+    recognition.onstart = () => {
+      console.log('Speech recognition started successfully');
+      setIsListening(true);
+      setErrorWithRef(null);
+      dispatch({ type: 'SET_LISTENING', payload: true });
+      startAudioRecording();
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const transcript = result[0].transcript;
+        const confidence = result[0].confidence || 0.8;
+
+        if (result.isFinal) {
+          finalTranscriptRef.current += transcript;
+          processTranscript(transcript, confidence);
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      const currentTranscript = finalTranscriptRef.current + interimTranscript;
+      setTranscript(currentTranscript);
+      setConfidence(event.results[event.results.length - 1]?.[0]?.confidence || 0);
+      dispatch({ type: 'SET_TRANSCRIPT', payload: currentTranscript });
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+
+      // Non-errors: silence and programmatic stop — just let onend handle restart
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        return;
+      }
+
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setErrorWithRef('Microphone permission denied');
+        isActiveRef.current = false;
+        return;
+      }
+
+      if (event.error === 'network') {
+        setErrorWithRef('Network error - please check your connection');
+        isActiveRef.current = false;
+        return;
+      }
+
+      // Audio capture errors — mark so onend doesn't restart on fatal errors
+      if (event.error === 'audio-capture') {
+        setErrorWithRef('No microphone detected');
+        isActiveRef.current = false;
+        return;
+      }
+
+      console.log('Will attempt to restart after error:', event.error);
+    };
+
+    recognition.onend = () => {
+      console.log('Speech recognition ended, isActive:', isActiveRef.current);
+
+      setIsListening(false);
+      dispatch({ type: 'SET_LISTENING', payload: false });
+      stopAudioRecording();
+
+      // Auto-restart if still active and no fatal error
+      if (isActiveRef.current && !errorRef.current) {
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isActiveRef.current && !errorRef.current) {
+            console.log('Auto-restarting speech recognition');
+            try {
+              const newRecognition = createRecognitionInstance();
+              recognitionRef.current = newRecognition;
+              newRecognition.start();
+            } catch (err) {
+              console.error('Failed to restart recognition:', err);
+              isActiveRef.current = false;
+            }
+          }
+        }, 300);
+      }
+    };
+
+    return recognition;
+  }, [dispatch, processTranscript, startAudioRecording, stopAudioRecording, setErrorWithRef]);
+
   const startListening = useCallback(async () => {
     if (!browserSupportsSpeechRecognition || isActiveRef.current) return;
-    
+
     try {
-      // Request permissions first
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+      // Request permissions and immediately release the stream
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach(track => track.stop());
+
       // Clear any existing timeouts
       if (restartTimeoutRef.current) {
         clearTimeout(restartTimeoutRef.current);
         restartTimeoutRef.current = null;
       }
-      
+
       // Stop existing recognition
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try { recognitionRef.current.stop(); } catch (_) {}
         recognitionRef.current = null;
       }
 
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-      recognition.maxAlternatives = 3; // Get multiple alternatives for better accuracy
-      
+      const recognition = createRecognitionInstance();
       recognitionRef.current = recognition;
       isActiveRef.current = true;
+      errorRef.current = null;
       finalTranscriptRef.current = '';
-      
-      recognition.onstart = () => {
-        console.log('Speech recognition started successfully');
-        setIsListening(true);
-        setError(null);
-        dispatch({ type: 'SET_LISTENING', payload: true });
-        dispatch({ type: 'SET_ERROR', payload: null });
-        startAudioRecording();
-      };
-      
-      recognition.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
-        
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          const transcript = result[0].transcript;
-          const confidence = result[0].confidence || 0.8;
-          
-          if (result.isFinal) {
-            finalTranscript += transcript;
-            finalTranscriptRef.current += transcript;
-            
-            // Process final results immediately
-            processTranscript(transcript, confidence);
-          } else {
-            interimTranscript += transcript;
-          }
-        }
-        
-        // Update UI with current transcript
-        const currentTranscript = finalTranscriptRef.current + interimTranscript;
-        setTranscript(currentTranscript);
-        setConfidence(event.results[event.results.length - 1]?.[0]?.confidence || 0);
-        dispatch({ type: 'SET_TRANSCRIPT', payload: currentTranscript });
-      };
-      
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setError('Microphone permission denied');
-          dispatch({ type: 'SET_ERROR', payload: 'Microphone permission denied' });
-          isActiveRef.current = false;
-          return;
-        }
-        
-        if (event.error === 'network') {
-          setError('Network error - please check your connection');
-          dispatch({ type: 'SET_ERROR', payload: 'Network error - please check your connection' });
-          return;
-        }
-        
-        // For other errors, try to restart after a delay
-        console.log('Will attempt to restart after error:', event.error);
-      };
-      
-      recognition.onend = () => {
-        console.log('Speech recognition ended, isActive:', isActiveRef.current);
-        
-        setIsListening(false);
-        dispatch({ type: 'SET_LISTENING', payload: false });
-        stopAudioRecording();
-        
-        // Auto-restart if still active
-        if (isActiveRef.current && !error) {
-          restartTimeoutRef.current = setTimeout(() => {
-            if (isActiveRef.current) {
-              console.log('Auto-restarting speech recognition');
-              try {
-                recognition.start();
-              } catch (err) {
-                console.error('Failed to restart recognition:', err);
-                isActiveRef.current = false;
-              }
-            }
-          }, 1000);
-        }
-      };
-      
+
       recognition.start();
-      
+
     } catch (err) {
       console.error('Failed to start speech recognition:', err);
-      setError(`Failed to start: ${err}`);
-      dispatch({ type: 'SET_ERROR', payload: `Failed to start: ${err}` });
+      setErrorWithRef(`Failed to start: ${err}`);
       isActiveRef.current = false;
     }
-  }, [browserSupportsSpeechRecognition, dispatch, processTranscript, startAudioRecording, stopAudioRecording, error]);
+  }, [browserSupportsSpeechRecognition, createRecognitionInstance, setErrorWithRef]);
 
   const stopListening = useCallback(() => {
     console.log('Stopping speech recognition');
