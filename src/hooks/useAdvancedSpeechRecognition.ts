@@ -2,6 +2,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTally } from '../context/TallyContext';
 
+export interface DebugEvent {
+  id: number;
+  at: number;
+  kind: 'start' | 'result-final' | 'result-interim' | 'error' | 'end' | 'restart' | 'match' | 'reject-confidence' | 'reject-no-match' | 'watchdog';
+  detail: string;
+  confidence?: number;
+}
+
 interface UseAdvancedSpeechRecognitionReturn {
   isListening: boolean;
   transcript: string;
@@ -11,6 +19,12 @@ interface UseAdvancedSpeechRecognitionReturn {
   stopListening: () => void;
   resetTranscript: () => void;
   browserSupportsSpeechRecognition: boolean;
+  debugEvents: DebugEvent[];
+  clearDebugEvents: () => void;
+  sessionHasAudio: boolean;
+  sessionRecordingSize: number;
+  downloadSessionAudio: () => void;
+  clearSessionAudio: () => void;
 }
 
 declare global {
@@ -50,6 +64,13 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  // Session chunks: accumulated for the entire listening session — never trimmed.
+  // Used to build a downloadable recording.
+  const sessionChunksRef = useRef<Blob[]>([]);
+  const sessionMimeRef = useRef<string>('audio/webm');
+  const sessionStartedAtRef = useRef<number>(0);
+  const [sessionRecordingSize, setSessionRecordingSize] = useState(0);
+  const [sessionHasAudio, setSessionHasAudio] = useState(false);
   const isActiveRef = useRef(false);
   const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const watchdogTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,6 +79,23 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const lastResultAtRef = useRef<number>(0);
   const restartAttemptsRef = useRef(0);
   const historyCounterRef = useRef(0);
+
+  // Debug event ring buffer (last 50 events) for the debug panel
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const debugIdRef = useRef(0);
+  const pushDebug = useCallback((kind: DebugEvent['kind'], detail: string, conf?: number) => {
+    const ev: DebugEvent = {
+      id: ++debugIdRef.current,
+      at: Date.now(),
+      kind,
+      detail,
+      confidence: conf,
+    };
+    setDebugEvents(prev => {
+      const next = prev.length >= 50 ? prev.slice(-49) : prev;
+      return [...next, ev];
+    });
+  }, []);
 
   // Live refs for state values used inside long-lived recognition callbacks.
   // Without these, the active recognition instance closes over stale state.
@@ -104,9 +142,19 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
   const processTranscript = useCallback((text: string, conf: number) => {
     if (!text.trim()) return;
-    if (conf < confidenceThresholdRef.current) return;
+
+    const threshold = confidenceThresholdRef.current;
+    if (conf < threshold) {
+      pushDebug(
+        'reject-confidence',
+        `"${text.trim()}" rejected (confidence ${conf.toFixed(2)} < threshold ${threshold.toFixed(2)})`,
+        conf,
+      );
+      return;
+    }
 
     const lowerText = text.toLowerCase().trim();
+    let anyMatch = false;
 
     for (const targetWord of targetWordsRef.current) {
       const searchTerms = [
@@ -128,10 +176,17 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       }
 
       if (!matchedTerm) continue;
+      anyMatch = true;
 
       const audioBlob = audioChunksRef.current.length > 0
         ? new Blob(audioChunksRef.current, { type: 'audio/webm' })
         : undefined;
+
+      pushDebug(
+        'match',
+        `"${matchedTerm}" matched "${targetWord.word}" x${matchCount}`,
+        conf,
+      );
 
       for (let i = 0; i < matchCount; i++) {
         playNotificationSound();
@@ -146,11 +201,15 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       }
     }
 
+    if (!anyMatch) {
+      pushDebug('reject-no-match', `"${text.trim()}" — no target word`, conf);
+    }
+
     // Trim audio chunks to avoid unbounded growth across long sessions
     if (audioChunksRef.current.length > 50) {
       audioChunksRef.current = audioChunksRef.current.slice(-25);
     }
-  }, [dispatch, playNotificationSound]);
+  }, [dispatch, playNotificationSound, pushDebug]);
 
   // Audio recording lives at the user-session level — start once on user start,
   // stop once on user stop. Not cycled per recognition restart.
@@ -184,9 +243,19 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+      sessionChunksRef.current = [];
+      sessionMimeRef.current = mediaRecorder.mimeType || mimeType || 'audio/webm';
+      sessionStartedAtRef.current = Date.now();
+      setSessionRecordingSize(0);
+      setSessionHasAudio(false);
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+          sessionChunksRef.current.push(event.data);
+          setSessionRecordingSize(s => s + event.data.size);
+          setSessionHasAudio(true);
+        }
       };
 
       mediaRecorder.start(250);
@@ -227,10 +296,10 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     recognition.onstart = () => {
       restartAttemptsRef.current = 0;
       lastResultAtRef.current = Date.now();
-      // Keep listening UI true across restarts — only set if not already
       setIsListening(true);
       setErrorWithRef(null);
       dispatch({ type: 'SET_LISTENING', payload: true });
+      pushDebug('start', 'recognition started');
     };
 
     recognition.onresult = (event: any) => {
@@ -246,6 +315,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
         if (result.isFinal) {
           finalTranscriptRef.current += t;
+          pushDebug('result-final', `"${t.trim()}"`, conf);
           processTranscript(t, conf);
         } else {
           interimTranscript += t;
@@ -266,6 +336,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
     recognition.onerror = (event: any) => {
       const code = event.error;
+      pushDebug('error', String(code));
 
       // Transient — let onend handle restart, no UI error state
       if (code === 'no-speech' || code === 'aborted') {
@@ -285,37 +356,34 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       }
 
       if (code === 'network') {
-        // Network errors are often transient — clear after a brief delay,
-        // do not stop the session
         console.warn('Speech recognition network error — will retry');
         return;
       }
 
-      // Other errors — log but allow restart
       console.warn('Speech recognition error:', code);
     };
 
     recognition.onend = () => {
-      // If user has stopped, do nothing
+      pushDebug('end', `active=${isActiveRef.current} err=${errorRef.current ?? '-'}`);
+
       if (!isActiveRef.current) {
         setIsListening(false);
         dispatch({ type: 'SET_LISTENING', payload: false });
         return;
       }
 
-      // Fatal errors abort the session
       if (errorRef.current) {
         setIsListening(false);
         dispatch({ type: 'SET_LISTENING', payload: false });
         return;
       }
 
-      // Auto-restart immediately to minimize the gap
+      pushDebug('restart', 'auto-restart');
       restartRecognitionRef.current();
     };
 
     return recognition;
-  }, [dispatch, processTranscript, setErrorWithRef]);
+  }, [dispatch, processTranscript, setErrorWithRef, pushDebug]);
 
   const restartRecognition = useCallback(() => {
     if (!isActiveRef.current || errorRef.current) return;
@@ -375,16 +443,15 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       if (!isActiveRef.current || errorRef.current) return;
       const stalled = Date.now() - lastResultAtRef.current > 15000;
       if (stalled && recognitionRef.current) {
-        console.warn('Speech recognition appears stalled — forcing restart');
+        pushDebug('watchdog', 'no results for 15s — forcing restart');
         try {
           recognitionRef.current.abort();
         } catch (_) {
           restartRecognitionRef.current();
         }
-        // onend will fire and trigger restart
       }
     }, 5000);
-  }, []);
+  }, [pushDebug]);
 
   const stopWatchdog = useCallback(() => {
     if (watchdogTimeoutRef.current) {
@@ -469,6 +536,39 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     dispatch({ type: 'SET_TRANSCRIPT', payload: '' });
   }, [dispatch]);
 
+  const getSessionAudioBlob = useCallback((): Blob | null => {
+    if (sessionChunksRef.current.length === 0) return null;
+    return new Blob(sessionChunksRef.current, { type: sessionMimeRef.current });
+  }, []);
+
+  const downloadSessionAudio = useCallback(() => {
+    const blob = getSessionAudioBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const ext = sessionMimeRef.current.includes('ogg') ? 'ogg'
+      : sessionMimeRef.current.includes('mp4') ? 'mp4'
+      : 'webm';
+    const ts = new Date(sessionStartedAtRef.current || Date.now())
+      .toISOString().replace(/[:.]/g, '-');
+    a.download = `voice-tally-${ts}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [getSessionAudioBlob]);
+
+  const clearSessionAudio = useCallback(() => {
+    sessionChunksRef.current = [];
+    setSessionRecordingSize(0);
+    setSessionHasAudio(false);
+  }, []);
+
+  const clearDebugEvents = useCallback(() => {
+    setDebugEvents([]);
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -494,5 +594,11 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     stopListening,
     resetTranscript,
     browserSupportsSpeechRecognition,
+    debugEvents,
+    clearDebugEvents,
+    sessionHasAudio,
+    sessionRecordingSize,
+    downloadSessionAudio,
+    clearSessionAudio,
   };
 }

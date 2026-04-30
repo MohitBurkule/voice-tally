@@ -6,16 +6,23 @@ import { useTally } from '../context/TallyContext';
 import { useAdvancedSpeechRecognition } from '../hooks/useAdvancedSpeechRecognition';
 import EnhancedStatusIndicator from '../components/EnhancedStatusIndicator';
 import EnhancedTallyCard from '../components/EnhancedTallyCard';
+import DebugPanel from '../components/DebugPanel';
 
 const TallyPage: React.FC = () => {
   const { state, dispatch, undo, redo, canUndo, canRedo } = useTally();
-  const { 
-    isListening, 
-    startListening, 
-    stopListening, 
+  const {
+    isListening,
+    startListening,
+    stopListening,
     browserSupportsSpeechRecognition,
     error,
-    confidence
+    confidence,
+    debugEvents,
+    clearDebugEvents,
+    sessionHasAudio,
+    sessionRecordingSize,
+    downloadSessionAudio,
+    clearSessionAudio,
   } = useAdvancedSpeechRecognition();
 
   const handleStartStop = () => {
@@ -110,6 +117,17 @@ const TallyPage: React.FC = () => {
 
         {/* Enhanced Status Indicator */}
         <EnhancedStatusIndicator confidence={confidence} />
+
+        {/* Debug panel — collapsible, shows live transcript, events, audio download */}
+        <DebugPanel
+          confidence={confidence}
+          debugEvents={debugEvents}
+          clearDebugEvents={clearDebugEvents}
+          sessionHasAudio={sessionHasAudio}
+          sessionRecordingSize={sessionRecordingSize}
+          downloadSessionAudio={downloadSessionAudio}
+          clearSessionAudio={clearSessionAudio}
+        />
 
         {/* Control Panel */}
         <motion.div

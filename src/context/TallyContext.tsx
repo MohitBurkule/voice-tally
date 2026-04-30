@@ -65,8 +65,12 @@ const initialState: TallyState = {
   settings: {
     theme: 'light',
     soundEnabled: true,
-    confidenceThreshold: 0.7
-  }
+    // 0 = process every final result regardless of reported confidence.
+    // Many browsers (including Safari and parts of Chromium) report 0 or low
+    // confidence for valid short utterances like "hello", which made detections
+    // silently drop. Users can raise this in Settings if they get false positives.
+    confidenceThreshold: 0,
+  },
 };
 
 type TallyAction =
@@ -230,13 +234,20 @@ const hydrateState = (stored: Partial<TallyState> | null): TallyState => {
   const base = stored && typeof stored === 'object'
     ? { ...initialState, ...stored }
     : { ...initialState };
-  // Always start fresh on runtime fields, regardless of what was stored
-  // (older versions of this app persisted runtime state)
+
+  // Migration: the old default confidence threshold of 0.7 silently dropped
+  // short-utterance detections. Reset it to the new default (0) so existing
+  // users get the fix without having to clear localStorage.
+  const settings = { ...initialState.settings, ...(base.settings || {}) };
+  if (settings.confidenceThreshold === 0.7) {
+    settings.confidenceThreshold = 0;
+  }
+
   return {
     ...base,
+    settings,
     ...RUNTIME_DEFAULTS,
     history: Array.isArray(base.history)
-      // Date objects don't survive JSON.stringify — rehydrate them
       ? base.history.map(h => ({ ...h, timestamp: new Date(h.timestamp) }))
       : [],
   };
