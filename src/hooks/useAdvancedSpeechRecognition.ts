@@ -66,6 +66,9 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const nextRecognitionRef = useRef<any>(null);
   const recognitionEndedAtRef = useRef<number>(0);
   const restartCountRef = useRef(0);
+  const sessionStartedListeningAtRef = useRef<number>(0);
+  const everReceivedResultRef = useRef(false);
+  const noResultWarningPushedRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -107,10 +110,14 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const targetWordsRef = useRef(state.targetWords);
   const confidenceThresholdRef = useRef(state.settings.confidenceThreshold);
   const soundEnabledRef = useRef(state.settings.soundEnabled);
+  const recordSessionAudioRef = useRef(state.settings.recordSessionAudio);
+  const recognitionLangRef = useRef(state.settings.recognitionLang);
 
   useEffect(() => { targetWordsRef.current = state.targetWords; }, [state.targetWords]);
   useEffect(() => { confidenceThresholdRef.current = state.settings.confidenceThreshold; }, [state.settings.confidenceThreshold]);
   useEffect(() => { soundEnabledRef.current = state.settings.soundEnabled; }, [state.settings.soundEnabled]);
+  useEffect(() => { recordSessionAudioRef.current = state.settings.recordSessionAudio; }, [state.settings.recordSessionAudio]);
+  useEffect(() => { recognitionLangRef.current = state.settings.recognitionLang; }, [state.settings.recognitionLang]);
 
   const browserSupportsSpeechRecognition = !!(
     typeof window !== 'undefined' &&
@@ -295,8 +302,12 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.maxAlternatives = 3;
+    // Prefer user's configured lang, fall back to browser locale, then en-US.
+    recognition.lang = recognitionLangRef.current
+      || (typeof navigator !== 'undefined' && navigator.language)
+      || 'en-US';
+    // 1 is the most compatible value across Chromium / Safari / Firefox.
+    recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
       restartAttemptsRef.current = 0;
@@ -319,6 +330,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
 
     recognition.onresult = (event: any) => {
       lastResultAtRef.current = Date.now();
+      everReceivedResultRef.current = true;
       let interimTranscript = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -472,7 +484,26 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     if (watchdogTimeoutRef.current) clearInterval(watchdogTimeoutRef.current);
     watchdogTimeoutRef.current = setInterval(() => {
       if (!isActiveRef.current || errorRef.current) return;
-      const stalled = Date.now() - lastResultAtRef.current > 15000;
+
+      const now = Date.now();
+
+      // Early signal: listening for 8s but never received any result event.
+      // Strongly suggests the browser's speech engine isn't actually
+      // transcribing (mic contention, unsupported lang model, blocked STT
+      // backend, mobile webview without service).
+      if (
+        !everReceivedResultRef.current &&
+        !noResultWarningPushedRef.current &&
+        now - sessionStartedListeningAtRef.current > 8000
+      ) {
+        noResultWarningPushedRef.current = true;
+        pushDebug(
+          'watchdog',
+          'No transcription events after 8s. Mic may be in use elsewhere, or browser/region does not support Web Speech transcription. Try: speak louder, switch lang in Settings, or use desktop Chrome / iOS Safari.',
+        );
+      }
+
+      const stalled = now - lastResultAtRef.current > 15000;
       if (stalled && recognitionRef.current) {
         pushDebug('watchdog', 'no results for 15s — forcing restart');
         try {
@@ -481,7 +512,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
           restartRecognitionRef.current();
         }
       }
-    }, 5000);
+    }, 2000);
   }, [pushDebug]);
 
   const stopWatchdog = useCallback(() => {
@@ -494,6 +525,15 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
   const startListening = useCallback(async () => {
     if (!browserSupportsSpeechRecognition || isActiveRef.current) return;
 
+    // Web Speech API requires a secure context (HTTPS or localhost).
+    // Failure here is silent on most mobile browsers — surface explicitly.
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      const msg = 'Speech recognition requires HTTPS. Open this app over https:// (or localhost) and try again.';
+      setErrorWithRef(msg);
+      pushDebug('error', msg);
+      return;
+    }
+
     // Reset state for a fresh session
     errorRef.current = null;
     setError(null);
@@ -504,13 +544,22 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     recognitionEndedAtRef.current = 0;
     nextRecognitionRef.current = null;
     lastResultAtRef.current = Date.now();
+    sessionStartedListeningAtRef.current = Date.now();
+    everReceivedResultRef.current = false;
+    noResultWarningPushedRef.current = false;
 
     try {
       // Mark active before kicking off async work so concurrent calls bail
       isActiveRef.current = true;
 
-      // Start audio recording ONCE for the session (independent of recognition cycles)
-      await startAudioRecording();
+      // Start audio recording for the session ONLY if the user opted in.
+      // Default OFF — running MediaRecorder alongside SpeechRecognition causes
+      // the speech engine to silently fail on iOS Safari and many Android
+      // builds (mic contention). Users who want session audio download can
+      // toggle it on in the debug panel.
+      if (recordSessionAudioRef.current) {
+        await startAudioRecording();
+      }
 
       // Clear any existing timeouts / instances
       if (restartTimeoutRef.current) {
@@ -539,6 +588,7 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     browserSupportsSpeechRecognition,
     createRecognitionInstance,
     dispatch,
+    pushDebug,
     setErrorWithRef,
     startAudioRecording,
     startWatchdog,

@@ -30,6 +30,14 @@ export interface TallyState {
     theme: 'light' | 'dark';
     soundEnabled: boolean;
     confidenceThreshold: number;
+    // Run a MediaRecorder alongside SpeechRecognition for the whole session.
+    // OFF by default because on mobile (especially iOS Safari, Android Chrome)
+    // having both grab the mic at the same time causes SpeechRecognition to
+    // silently never fire onresult.
+    recordSessionAudio: boolean;
+    // BCP-47 language tag for SpeechRecognition.lang. Empty string = use
+    // navigator.language fallback.
+    recognitionLang: string;
   };
 }
 
@@ -70,6 +78,8 @@ const initialState: TallyState = {
     // confidence for valid short utterances like "hello", which made detections
     // silently drop. Users can raise this in Settings if they get false positives.
     confidenceThreshold: 0,
+    recordSessionAudio: false,
+    recognitionLang: '',
   },
 };
 

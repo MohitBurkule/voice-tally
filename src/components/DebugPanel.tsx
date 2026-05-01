@@ -48,9 +48,11 @@ const DebugPanel: React.FC<DebugPanelProps> = ({
   clearSessionAudio,
 }) => {
   const [open, setOpen] = useState(false);
-  const { state } = useTally();
+  const { state, dispatch } = useTally();
   const threshold = state.settings.confidenceThreshold;
   const transcript = state.currentTranscript;
+  const recordSessionAudio = state.settings.recordSessionAudio;
+  const recognitionLang = state.settings.recognitionLang;
 
   const reversed = [...debugEvents].reverse();
 
@@ -137,16 +139,53 @@ const DebugPanel: React.FC<DebugPanelProps> = ({
                 </div>
               </div>
 
-              {/* Session audio */}
+              {/* Recognition language */}
+              <div>
+                <h4 className="text-sm font-semibold text-card-foreground mb-2">Recognition language</h4>
+                <input
+                  type="text"
+                  placeholder="auto (browser default)"
+                  value={recognitionLang}
+                  onChange={(e) => dispatch({
+                    type: 'UPDATE_SETTINGS',
+                    payload: { recognitionLang: e.target.value },
+                  })}
+                  className="w-full px-3 py-2 bg-muted/40 border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  BCP-47 tag (e.g. <code>en-US</code>, <code>en-GB</code>, <code>hi-IN</code>). Empty = browser default. Restart listening to apply.
+                </p>
+              </div>
+
+              {/* Session audio toggle */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-sm font-semibold text-card-foreground flex items-center space-x-2">
                     <Volume2 className="h-4 w-4" />
-                    <span>Session recording</span>
+                    <span>Session audio recording</span>
                   </h4>
-                  <span className="text-xs text-muted-foreground">
-                    {sessionHasAudio ? formatBytes(sessionRecordingSize) : 'not recording yet'}
-                  </span>
+                  <label className="inline-flex items-center cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={recordSessionAudio}
+                      onChange={(e) => dispatch({
+                        type: 'UPDATE_SETTINGS',
+                        payload: { recordSessionAudio: e.target.checked },
+                      })}
+                    />
+                    <div className="relative w-11 h-6 bg-muted rounded-full peer-checked:bg-primary transition-colors">
+                      <div className={`absolute top-0.5 left-0.5 h-5 w-5 bg-white rounded-full shadow transition-transform ${recordSessionAudio ? 'translate-x-5' : ''}`} />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="text-xs text-amber-600 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-2">
+                  Off by default. Recording the mic alongside speech recognition causes the recognizer to silently fail on iOS Safari and many Android Chrome builds. Only turn this on if you need a downloadable session recording — and verify words still count when it's on. Restart listening to apply.
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                  <span>{sessionHasAudio ? formatBytes(sessionRecordingSize) : 'no audio buffered'}</span>
                 </div>
                 <div className="flex space-x-2">
                   <button
