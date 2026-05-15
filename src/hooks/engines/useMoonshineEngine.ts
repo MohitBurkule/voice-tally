@@ -65,10 +65,18 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
     setModelLoadProgress(0);
     pushDebug('model-load', 'Moonshine: downloading moonshine-tiny…');
     const { pipeline } = await import('@huggingface/transformers');
+    // The default quantized variant of moonshine-tiny-ONNX has broken
+    // MatMulNBits metadata in the decoder embedding (missing _scale tensor),
+    // which produces "Can't create a session" at runtime. Force fp32 weights
+    // to sidestep that bug — slower load but stable.
     const transcriber: any = await pipeline(
       'automatic-speech-recognition',
       'onnx-community/moonshine-tiny-ONNX',
       {
+        dtype: {
+          encoder_model: 'fp32',
+          decoder_model_merged: 'fp32',
+        } as any,
         progress_callback: (p: any) => {
           if (typeof p?.progress === 'number') {
             setModelLoadProgress(p.progress / 100);
