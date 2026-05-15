@@ -111,21 +111,161 @@ if [[ ! -d android ]]; then
   npx --yes cap add android
 fi
 
-# Patch AndroidManifest with RECORD_AUDIO permission (idempotent)
+# Compute the package's filesystem path (co.example.app -> co/example/app).
+# Used for writing Kotlin sources under android/app/src/main/java/.
+PKG_PATH=$(echo "$APP_ID" | tr '.' '/')
+
+# Patch AndroidManifest: permissions + foreground-service declaration.
+# Idempotent: keyed off RECORD_AUDIO presence. The foreground service +
+# microphone-typed FOREGROUND_SERVICE permission keep the mic alive when the
+# screen is off / app backgrounded (Android 14+ enforces typed perms).
 MANIFEST=android/app/src/main/AndroidManifest.xml
 if [[ -f "$MANIFEST" ]] && ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST"; then
-  echo "→ Injecting RECORD_AUDIO permission into AndroidManifest"
-  # Insert <uses-permission .../> right after the <manifest ...> opening tag.
+  echo "→ Injecting permissions + MicForegroundService into AndroidManifest"
   awk '
-    /<manifest [^>]*>/ && !done {
+    /<manifest [^>]*>/ && !perms_done {
       print
       print "    <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />"
       print "    <uses-permission android:name=\"android.permission.INTERNET\" />"
-      done = 1
+      print "    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />"
+      print "    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_MICROPHONE\" />"
+      print "    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />"
+      print "    <uses-permission android:name=\"android.permission.WAKE_LOCK\" />"
+      perms_done = 1
       next
+    }
+    /<\/application>/ && !svc_done {
+      print "        <service"
+      print "            android:name=\".MicForegroundService\""
+      print "            android:exported=\"false\""
+      print "            android:foregroundServiceType=\"microphone\" />"
+      svc_done = 1
     }
     { print }
   ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+fi
+
+# ------------------------------------------- foreground-service Kotlin sources
+# Write a Service + Capacitor plugin into the app's java/ tree. The plugin
+# exposes start()/stop() to JS via window.Capacitor.Plugins.MicForeground.
+JAVA_DIR="android/app/src/main/java/$PKG_PATH"
+if [[ -d "$JAVA_DIR" && ! -f "$JAVA_DIR/MicForegroundService.kt" ]]; then
+  echo "→ Writing MicForegroundService.kt + MicForegroundPlugin.kt"
+
+  cat > "$JAVA_DIR/MicForegroundService.kt" <<KOTLIN
+package $APP_ID
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+
+// Foreground service that keeps the mic alive while the app is in the
+// background or the screen is off. On Android 14+ FOREGROUND_SERVICE_TYPE_MICROPHONE
+// is required for the OS to let our MediaRecorder / AudioRecord stream keep
+// running outside the foreground.
+class MicForegroundService : Service() {
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val channelId = "voice_tally_mic"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (mgr.getNotificationChannel(channelId) == null) {
+                val ch = NotificationChannel(
+                    channelId,
+                    "Voice Tally Listening",
+                    NotificationManager.IMPORTANCE_LOW,
+                )
+                ch.description = "Shown while the mic is active in the background"
+                mgr.createNotificationChannel(ch)
+            }
+        }
+        val notif: Notification = Notification.Builder(this, channelId)
+            .setContentTitle("Voice Tally")
+            .setContentText("Listening for tally words")
+            .setSmallIcon(applicationInfo.icon)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(1, notif)
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+    }
+}
+KOTLIN
+
+  cat > "$JAVA_DIR/MicForegroundPlugin.kt" <<KOTLIN
+package $APP_ID
+
+import android.content.Intent
+import android.os.Build
+import com.getcapacitor.Plugin
+import com.getcapacitor.PluginCall
+import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.CapacitorPlugin
+
+// JS bridge to MicForegroundService.
+//   Capacitor.Plugins.MicForeground.start()
+//   Capacitor.Plugins.MicForeground.stop()
+@CapacitorPlugin(name = "MicForeground")
+class MicForegroundPlugin : Plugin() {
+    @PluginMethod
+    fun start(call: PluginCall) {
+        val intent = Intent(context, MicForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun stop(call: PluginCall) {
+        context.stopService(Intent(context, MicForegroundService::class.java))
+        call.resolve()
+    }
+}
+KOTLIN
+
+  # Register the plugin in MainActivity. Default Capacitor MainActivity has
+  # an empty body, so we replace it with one that registers our plugin
+  # before super.onCreate (required by Capacitor's plugin loader).
+  MAIN_ACTIVITY="$JAVA_DIR/MainActivity.kt"
+  if [[ -f "$MAIN_ACTIVITY" ]] && ! grep -q "MicForegroundPlugin" "$MAIN_ACTIVITY"; then
+    echo "→ Registering MicForegroundPlugin in MainActivity.kt"
+    cat > "$MAIN_ACTIVITY" <<KOTLIN
+package $APP_ID
+
+import android.os.Bundle
+import com.getcapacitor.BridgeActivity
+
+class MainActivity : BridgeActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        registerPlugin(MicForegroundPlugin::class.java)
+        super.onCreate(savedInstanceState)
+    }
+}
+KOTLIN
+  fi
 fi
 
 # Set versionName / versionCode in build.gradle

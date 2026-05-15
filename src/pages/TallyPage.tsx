@@ -5,6 +5,7 @@ import { Play, Pause, RotateCcw, Undo, Redo, Settings, Zap } from 'lucide-react'
 import { useTally } from '../context/TallyContext';
 import { useSpeechEngine } from '../hooks/engines/useSpeechEngine';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { startBackgroundMic, stopBackgroundMic } from '../native/backgroundMic';
 import { useSEO } from '../seo/SEOContext';
 import EnhancedStatusIndicator from '../components/EnhancedStatusIndicator';
 import EnhancedTallyCard from '../components/EnhancedTallyCard';
@@ -17,9 +18,6 @@ const TallyPage: React.FC = () => {
   const { state, dispatch, undo, redo, canUndo, canRedo } = useTally();
   const seo = useSEO();
 
-  // Keep the screen on while listening — the only reliable way to stop
-  // mobile browsers from suspending the mic when the screen would lock.
-  useWakeLock(isListening);
   const {
     isListening,
     startListening,
@@ -36,6 +34,22 @@ const TallyPage: React.FC = () => {
     engineStatus,
     modelLoadProgress,
   } = useSpeechEngine();
+
+  // Keep the screen on while listening — the only reliable way to stop
+  // mobile browsers from suspending the mic when the screen would lock.
+  useWakeLock(isListening);
+
+  // On the Android APK, start a typed foreground service so the mic keeps
+  // running with the screen off / app backgrounded. No-op in browsers
+  // (falls back to Wake Lock above).
+  useEffect(() => {
+    if (isListening) {
+      startBackgroundMic();
+      return () => {
+        stopBackgroundMic();
+      };
+    }
+  }, [isListening]);
 
   const handleStartStop = () => {
     if (isListening) {
