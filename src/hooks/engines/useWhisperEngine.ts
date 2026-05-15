@@ -65,10 +65,16 @@ export function useWhisperEngine(): UnifiedSpeechRecognition {
     setModelLoadProgress(0);
     pushDebug('model-load', 'Whisper: downloading whisper-tiny.en (~75MB)…');
     const { pipeline } = await import('@huggingface/transformers');
+    // Default dtype on mobile WebGPU is q4 / q4f16. The MatMulNBits operator
+    // those use has a broken _scale tensor export → "Can't create a session".
+    // Pin to q8 (8-bit, well-supported, ~half the size of fp32) and force
+    // device: 'wasm' so we don't hit WebGPU defaults.
     const transcriber: any = await pipeline(
       'automatic-speech-recognition',
       'Xenova/whisper-tiny.en',
       {
+        device: 'wasm' as any,
+        dtype: 'q8' as any,
         progress_callback: (p: any) => {
           if (typeof p?.progress === 'number') {
             setModelLoadProgress(p.progress / 100);

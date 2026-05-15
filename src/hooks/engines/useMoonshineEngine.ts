@@ -65,18 +65,15 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
     setModelLoadProgress(0);
     pushDebug('model-load', 'Moonshine: downloading moonshine-tiny…');
     const { pipeline } = await import('@huggingface/transformers');
-    // The default quantized variant of moonshine-tiny-ONNX has broken
-    // MatMulNBits metadata in the decoder embedding (missing _scale tensor),
-    // which produces "Can't create a session" at runtime. Force fp32 weights
-    // to sidestep that bug — slower load but stable.
+    // WebGPU's q4/q4f16 defaults hit a broken MatMulNBits export in
+    // moonshine-tiny-ONNX's decoder embedding. Pin to q8 + WASM device for
+    // a stable code path that works on mobile Chrome and Safari.
     const transcriber: any = await pipeline(
       'automatic-speech-recognition',
       'onnx-community/moonshine-tiny-ONNX',
       {
-        dtype: {
-          encoder_model: 'fp32',
-          decoder_model_merged: 'fp32',
-        } as any,
+        device: 'wasm' as any,
+        dtype: 'q8' as any,
         progress_callback: (p: any) => {
           if (typeof p?.progress === 'number') {
             setModelLoadProgress(p.progress / 100);
