@@ -1,0 +1,5 @@
+# Netlify / Cloudflare Pages SPA fallback.
+# Per-route SEO HTML files (emitted by seoPrerenderPlugin) take precedence
+# over this catch-all because the host checks for literal files first.
+# Anything else (e.g. /settings, /history) falls through to the SPA shell.
+/*  /index.html  200

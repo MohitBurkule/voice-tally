@@ -1,0 +1,60 @@
+# Preinstalled Android toolchain for headless APK builds.
+#
+# Build the image once, then mount the repo and run the build script:
+#
+#   docker build -f Dockerfile.android -t voice-tally-android .
+#   docker run --rm -v "$PWD":/app -w /app voice-tally-android \
+#     bash scripts/build-android-apk.sh
+#
+# Output APK lands in ./dist-android/ on the host.
+#
+# To produce a signed release APK, also mount the keystore and pass an env
+# file:
+#
+#   docker run --rm \
+#     -v "$PWD":/app -w /app \
+#     -v "$HOME/keystores:/keystores:ro" \
+#     --env-file .env.android \
+#     voice-tally-android \
+#     bash scripts/build-android-apk.sh
+
+FROM eclipse-temurin:17-jdk-jammy
+
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:$PATH \
+    DEBIAN_FRONTEND=noninteractive
+
+# Pinned SDK component versions — bump in sync with Capacitor's templates.
+ARG ANDROID_API=34
+ARG ANDROID_BUILD_TOOLS=34.0.0
+ARG CMDLINE_TOOLS_VERSION=11076708
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl unzip git ca-certificates \
+      build-essential \
+      libglu1-mesa \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 20 (Capacitor 6 needs >=18)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Android cmdline-tools
+RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
+    && curl -fsSL -o /tmp/cmdline-tools.zip \
+       "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip" \
+    && unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools" \
+    && mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" \
+    && rm /tmp/cmdline-tools.zip
+
+# Accept licenses + install platform + build-tools
+RUN yes | sdkmanager --licenses >/dev/null \
+    && sdkmanager \
+       "platform-tools" \
+       "platforms;android-${ANDROID_API}" \
+       "build-tools;${ANDROID_BUILD_TOOLS}"
+
+WORKDIR /app
+CMD ["bash", "scripts/build-android-apk.sh"]

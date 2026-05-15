@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Android export — generated on demand by scripts/build-android-apk.sh
+.env.android
+android/
+dist-android/
+capacitor.config.json
+

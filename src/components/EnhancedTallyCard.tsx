@@ -98,23 +98,33 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
         />
       )}
       
-      <div className="relative bg-card border border-border rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 overflow-hidden">
+      <div className="relative bg-card border border-border rounded-2xl p-4 sm:p-8 shadow-xl hover:shadow-2xl transition-all duration-300 overflow-hidden">
+        {/* Shortcut badge — only visible on devices that have a keyboard */}
+        {index < 10 && (
+          <div
+            className="hidden md:flex absolute top-3 right-3 items-center justify-center w-7 h-7 rounded-md bg-muted/70 border border-border/60 text-[11px] font-mono font-semibold text-muted-foreground"
+            title={`Keyboard: ${index === 9 ? '0' : index + 1} = +1, Shift+${index === 9 ? '0' : index + 1} = −1`}
+          >
+            {index === 9 ? '0' : index + 1}
+          </div>
+        )}
+
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-4">
+        <div className="flex items-center justify-between mb-4 sm:mb-6">
+          <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
             <motion.div
-              className="w-6 h-6 rounded-full shadow-lg"
+              className="w-5 h-5 sm:w-6 sm:h-6 rounded-full shadow-lg shrink-0"
               style={{ backgroundColor: word.color }}
               whileHover={{ scale: 1.2, rotate: 180 }}
               transition={{ duration: 0.3 }}
             />
-            <div>
-              <h3 className="text-2xl font-bold text-card-foreground">{word.word}</h3>
-              <p className="text-sm text-muted-foreground">Target word</p>
+            <div className="min-w-0">
+              <h3 className="text-xl sm:text-2xl font-bold text-card-foreground truncate">{word.word}</h3>
+              <p className="text-xs sm:text-sm text-muted-foreground">Target word</p>
             </div>
           </div>
-          
-          <div className="flex items-center space-x-2">
+
+          <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
             {/* Recent activity indicator */}
             {recentHistory.length > 0 && (
               <motion.div
@@ -126,7 +136,7 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
                 <span className="text-xs font-medium">+{recentHistory.length}</span>
               </motion.div>
             )}
-            
+
             <motion.button
               onClick={handleReset}
               className="p-2 text-muted-foreground hover:text-destructive transition-colors duration-200 rounded-lg hover:bg-destructive/10"
@@ -134,18 +144,18 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
               whileTap={{ scale: 0.9 }}
               title="Reset count"
             >
-              <RotateCcw className="h-5 w-5" />
+              <RotateCcw className="h-4 w-4 sm:h-5 sm:w-5" />
             </motion.button>
           </div>
         </div>
 
         {/* Counter display */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-5 sm:mb-8">
           <div className="relative">
             <AnimatePresence mode="wait">
               <motion.div
                 key={word.count}
-                className={`text-8xl font-black ${isAnimating ? 'animate-bounce' : ''}`}
+                className={`text-6xl sm:text-8xl font-black leading-none ${isAnimating ? 'animate-bounce' : ''}`}
                 style={{ color: word.color }}
                 initial={{ opacity: 0, scale: 0.5, rotateX: -90 }}
                 animate={{ opacity: 1, scale: 1, rotateX: 0 }}
@@ -180,7 +190,7 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
           </div>
           
           <motion.p
-            className="text-muted-foreground mt-3 font-medium"
+            className="text-muted-foreground mt-2 sm:mt-3 text-sm sm:text-base font-medium"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
@@ -189,45 +199,47 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
           </motion.p>
         </div>
 
-        {/* Control buttons */}
-        <div className="flex items-center justify-center space-x-6 mb-6">
+        {/* Control buttons — bigger tap targets on mobile (touch needs ~44px min) */}
+        <div className="flex items-center justify-center space-x-4 sm:space-x-6 mb-4 sm:mb-6">
           <motion.button
             onClick={handleDecrement}
             disabled={word.count === 0}
-            className="p-4 bg-destructive/10 text-destructive rounded-full hover:bg-destructive/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-lg"
+            className="p-3 sm:p-4 bg-destructive/10 text-destructive rounded-full hover:bg-destructive/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-lg min-w-[48px] min-h-[48px] flex items-center justify-center"
             whileHover={{ scale: 1.1, y: -2 }}
             whileTap={{ scale: 0.9 }}
             variants={{
               hover: { boxShadow: "0 10px 25px rgba(239, 68, 68, 0.3)" }
             }}
+            aria-label={`Decrement ${word.word}`}
           >
-            <Minus className="h-6 w-6" />
+            <Minus className="h-5 w-5 sm:h-6 sm:w-6" />
           </motion.button>
-          
+
           <motion.button
             onClick={handleIncrement}
-            className="p-4 bg-green-500/10 text-green-500 rounded-full hover:bg-green-500/20 transition-all duration-200 shadow-lg"
+            className="p-3 sm:p-4 bg-green-500/10 text-green-500 rounded-full hover:bg-green-500/20 transition-all duration-200 shadow-lg min-w-[48px] min-h-[48px] flex items-center justify-center"
             whileHover={{ scale: 1.1, y: -2 }}
             whileTap={{ scale: 0.9 }}
             variants={{
               hover: { boxShadow: "0 10px 25px rgba(34, 197, 94, 0.3)" }
             }}
+            aria-label={`Increment ${word.word}`}
           >
-            <Plus className="h-6 w-6" />
+            <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
           </motion.button>
         </div>
 
         {/* Homophones section */}
         {word.homophones.length > 0 && (
           <motion.div
-            className="border-t border-border pt-6"
+            className="border-t border-border pt-4 sm:pt-6"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
           >
-            <div className="flex items-center space-x-2 mb-3">
+            <div className="flex items-center space-x-2 mb-2 sm:mb-3">
               <Volume2 className="h-4 w-4 text-muted-foreground" />
-              <p className="text-sm font-medium text-muted-foreground">Also listening for:</p>
+              <p className="text-xs sm:text-sm font-medium text-muted-foreground">Also listening for:</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {word.homophones.map((homophone, idx) => (

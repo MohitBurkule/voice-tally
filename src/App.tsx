@@ -14,6 +14,8 @@ import SettingsPage from "./pages/SettingsPage";
 import HistoryPage from "./pages/HistoryPage";
 import HelpPage from "./pages/HelpPage";
 import NotFound from "./pages/NotFound";
+import { SEOProvider } from "./seo/SEOContext";
+import { seoRoutes } from "./seo/seoConfig";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -41,21 +43,30 @@ const App = () => (
               <Navbar />
               <AnimatePresence mode="wait">
                 <Routes>
-                  <Route 
-                    path="/" 
-                    element={
-                      <PageWrapper>
-                        <TallyPage />
-                      </PageWrapper>
-                    } 
-                  />
-                  <Route 
-                    path="/settings" 
+                  {/* SEO landing routes — each renders TallyPage with a
+                      route-specific H1 / meta / canonical so the app ranks
+                      for "voice counter", "word counter", "tally counter",
+                      etc. without duplicate-content penalties. */}
+                  {seoRoutes.map((path) => (
+                    <Route
+                      key={path}
+                      path={path}
+                      element={
+                        <PageWrapper>
+                          <SEOProvider path={path}>
+                            <TallyPage />
+                          </SEOProvider>
+                        </PageWrapper>
+                      }
+                    />
+                  ))}
+                  <Route
+                    path="/settings"
                     element={
                       <PageWrapper>
                         <SettingsPage />
                       </PageWrapper>
-                    } 
+                    }
                   />
                   <Route 
                     path="/history" 
