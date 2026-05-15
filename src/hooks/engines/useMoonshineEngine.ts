@@ -13,6 +13,39 @@ import type { UnifiedSpeechRecognition } from './types';
 const TARGET_SR = 16000;
 const CHUNK_SECONDS = 2.0; // Moonshine handles short clips well
 
+// Root-mean-square audio energy. Below ~0.005 is effectively silence for a
+// 16 kHz mic stream after echoCancellation+noiseSuppression. We use this to
+// skip transcription on quiet chunks — Whisper-family models hallucinate
+// repeated tokens when fed near-silent audio.
+function rms(arr: Float32Array): number {
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) s += arr[i] * arr[i];
+  return Math.sqrt(s / Math.max(1, arr.length));
+}
+
+// Cap repeated occurrences of any single token in one chunk's transcript.
+// The cap is derived from the chunk duration × max sustainable word rate:
+// even fast speech tops out around 4 words/sec for sustained repeats, so a
+// 2-second chunk that emits the same token >8 times is the decoder looping,
+// not the user counting fast. Drops overflow while preserving order — a
+// real "react react react react …" still counts up to the physical bound.
+function capPerTokenRepeats(text: string, maxPerToken: number): string {
+  const tokens = text.split(/\s+/);
+  const seen: Record<string, number> = {};
+  const kept: string[] = [];
+  for (const t of tokens) {
+    const key = t.toLowerCase().replace(/[^a-z]/g, '');
+    if (!key) {
+      kept.push(t);
+      continue;
+    }
+    seen[key] = (seen[key] || 0) + 1;
+    if (seen[key] > maxPerToken) continue;
+    kept.push(t);
+  }
+  return kept.join(' ');
+}
+
 function resampleTo16k(input: Float32Array, sourceSampleRate: number): Float32Array {
   if (sourceSampleRate === TARGET_SR) return input;
   const ratio = sourceSampleRate / TARGET_SR;
@@ -108,9 +141,22 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
 
     try {
       const resampled = resampleTo16k(merged, sourceSampleRateRef.current);
+
+      // Skip near-silent chunks — feeding them to the decoder reliably
+      // produces hallucinated repeat-loops.
+      if (rms(resampled) < 0.005) {
+        pushDebug('reject-no-match', '(silence — chunk skipped)', 0);
+        return;
+      }
+
       const transcriber = transcriberRef.current;
       const result = await transcriber(resampled);
-      const text: string = result?.text?.trim?.() || '';
+      const rawText: string = result?.text?.trim?.() || '';
+      const maxRepeats = Math.max(2, Math.floor(CHUNK_SECONDS * 4));
+      const text = rawText ? capPerTokenRepeats(rawText, maxRepeats) : '';
+      if (rawText && text !== rawText) {
+        pushDebug('reject-no-match', `(repeat-loop capped: "${rawText}" → "${text}")`, 0);
+      }
       if (text) {
         finalTextRef.current += (finalTextRef.current ? ' ' : '') + text;
         if (finalTextRef.current.length > 2000) {
