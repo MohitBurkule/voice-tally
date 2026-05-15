@@ -85,12 +85,37 @@ export function useVoskEngine(): UnifiedSpeechRecognition {
       recognizerRef.current = recognizer;
 
       recognizer.on('result', (message: any) => {
-        const text: string = message?.result?.text || '';
-        if (!text) return;
-        // Average word confidence
+        const rawText: string = message?.result?.text || '';
+        if (!rawText) return;
+        // Per-word entries: { word, start, end, conf } (seconds).
         const words = message?.result?.result || [];
-        const conf = words.length
-          ? words.reduce((s: number, w: any) => s + (w.conf || 0), 0) / words.length
+
+        // Vosk in grammar mode occasionally fragments a single spoken token
+        // into two consecutive identical entries (e.g. user says "react"
+        // once, model emits "react react" with ~10–50 ms between them).
+        // Collapse same-word runs whose inter-word gap is implausibly small
+        // for an actual second utterance — typical English word duration is
+        // 300–500 ms, so anything under 150 ms between ends is an artifact.
+        const collapsed: any[] = [];
+        for (const w of words) {
+          const last = collapsed[collapsed.length - 1];
+          if (
+            last &&
+            last.word === w.word &&
+            typeof last.end === 'number' &&
+            typeof w.start === 'number' &&
+            w.start - last.end < 0.15
+          ) {
+            last.end = w.end;
+            continue;
+          }
+          collapsed.push({ ...w });
+        }
+        const text = collapsed.length
+          ? collapsed.map((w: any) => w.word).join(' ')
+          : rawText;
+        const conf = collapsed.length
+          ? collapsed.reduce((s: number, w: any) => s + (w.conf || 0), 0) / collapsed.length
           : 1;
         finalTextRef.current += (finalTextRef.current ? ' ' : '') + text;
         if (finalTextRef.current.length > 2000) {
