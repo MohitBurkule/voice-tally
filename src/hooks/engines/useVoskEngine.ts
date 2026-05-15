@@ -3,7 +3,7 @@
 // We constrain the recognizer's vocab to the user's target words + homophones,
 // which dramatically improves accuracy for the tally use case.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTally } from '../../context/TallyContext';
 import { useTranscriptProcessor } from './useTranscriptProcessor';
 import type { UnifiedSpeechRecognition } from './types';
@@ -178,18 +178,24 @@ export function useVoskEngine(): UnifiedSpeechRecognition {
     pushDebug('end', 'Vosk stopped');
   }, [dispatch, pushDebug]);
 
-  // Rebuild recognizer when target words change mid-session
+  // Stable vocab signature: only words + homophones, NOT counts. Without this,
+  // every INCREMENT_WORD reducer returns a new targetWords array reference and
+  // re-triggers the rebuild, restarting the engine after every match.
+  const vocabSignature = useMemo(
+    () =>
+      state.targetWords
+        .map(tw => [tw.word, ...(tw.homophones || [])].join(','))
+        .join('|'),
+    [state.targetWords],
+  );
+
+  // Rebuild recognizer only when the vocabulary actually changes mid-session
   useEffect(() => {
     if (!isActiveRef.current || !modelRef.current) return;
-    // Simplest: stop + restart so grammar is rebuilt
-    const wasActive = isActiveRef.current;
-    if (wasActive) {
-      stopListening();
-      // Small delay then resume
-      setTimeout(() => { startListening(); }, 250);
-    }
+    stopListening();
+    setTimeout(() => { startListening(); }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.targetWords]);
+  }, [vocabSignature]);
 
   useEffect(() => () => {
     isActiveRef.current = false;

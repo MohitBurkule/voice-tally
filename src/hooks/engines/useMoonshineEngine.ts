@@ -65,15 +65,16 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
     setModelLoadProgress(0);
     pushDebug('model-load', 'Moonshine: downloading moonshine-tiny…');
     const { pipeline } = await import('@huggingface/transformers');
-    // WebGPU's q4/q4f16 defaults hit a broken MatMulNBits export in
-    // moonshine-tiny-ONNX's decoder embedding. Pin to q8 + WASM device for
-    // a stable code path that works on mobile Chrome and Safari.
+    // q4/q4f16 (WebGPU defaults) AND q8 both hit the broken MatMulNBits
+    // _scale export in moonshine-tiny-ONNX's decoder. Only fp32 pulls
+    // non-quantized weights for every sub-model. ~80MB but actually loads
+    // on mobile Chrome and Safari.
     const transcriber: any = await pipeline(
       'automatic-speech-recognition',
       'onnx-community/moonshine-tiny-ONNX',
       {
         device: 'wasm' as any,
-        dtype: 'q8' as any,
+        dtype: { encoder_model: 'fp32', decoder_model_merged: 'fp32' } as any,
         progress_callback: (p: any) => {
           if (typeof p?.progress === 'number') {
             setModelLoadProgress(p.progress / 100);

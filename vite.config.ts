@@ -83,7 +83,7 @@ export default defineConfig(({ mode }) => ({
               url.hostname.endsWith(".huggingface.co"),
             handler: "CacheFirst",
             options: {
-              cacheName: "hf-models-v1",
+              cacheName: "hf-models-v2-fp32",
               expiration: {
                 maxEntries: 50,
                 maxAgeSeconds: 60 * 60 * 24 * 90,
