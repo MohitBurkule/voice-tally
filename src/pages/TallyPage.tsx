@@ -3,7 +3,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, RotateCcw, Undo, Redo, Settings, Zap } from 'lucide-react';
 import { useTally } from '../context/TallyContext';
-import { useAdvancedSpeechRecognition } from '../hooks/useAdvancedSpeechRecognition';
+import { useSpeechEngine } from '../hooks/engines/useSpeechEngine';
 import EnhancedStatusIndicator from '../components/EnhancedStatusIndicator';
 import EnhancedTallyCard from '../components/EnhancedTallyCard';
 import DebugPanel from '../components/DebugPanel';
@@ -23,7 +23,9 @@ const TallyPage: React.FC = () => {
     sessionRecordingSize,
     downloadSessionAudio,
     clearSessionAudio,
-  } = useAdvancedSpeechRecognition();
+    engineStatus,
+    modelLoadProgress,
+  } = useSpeechEngine();
 
   const handleStartStop = () => {
     if (isListening) {
@@ -127,6 +129,8 @@ const TallyPage: React.FC = () => {
           sessionRecordingSize={sessionRecordingSize}
           downloadSessionAudio={downloadSessionAudio}
           clearSessionAudio={clearSessionAudio}
+          engineStatus={engineStatus}
+          modelLoadProgress={modelLoadProgress}
         />
 
         {/* Control Panel */}

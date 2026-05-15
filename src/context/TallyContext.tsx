@@ -38,6 +38,12 @@ export interface TallyState {
     // BCP-47 language tag for SpeechRecognition.lang. Empty string = use
     // navigator.language fallback.
     recognitionLang: string;
+    // Which speech recognition engine to use.
+    //  - 'webspeech': browser Web Speech API (free, online, mobile-flaky)
+    //  - 'vosk': Vosk Kaldi ASR via WASM (~40MB model, offline, real-time)
+    //  - 'whisper': Transformers.js Whisper-tiny (~75MB, best quality, chunked)
+    //  - 'moonshine': Transformers.js Moonshine-tiny (mobile-optimized, streaming)
+    engine: 'webspeech' | 'vosk' | 'whisper' | 'moonshine';
   };
 }
 
@@ -80,6 +86,7 @@ const initialState: TallyState = {
     confidenceThreshold: 0,
     recordSessionAudio: false,
     recognitionLang: '',
+    engine: 'webspeech',
   },
 };
 

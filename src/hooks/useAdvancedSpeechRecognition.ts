@@ -1,14 +1,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTally } from '../context/TallyContext';
+import type { DebugEvent } from './engines/types';
 
-export interface DebugEvent {
-  id: number;
-  at: number;
-  kind: 'start' | 'result-final' | 'result-interim' | 'error' | 'end' | 'restart' | 'match' | 'reject-confidence' | 'reject-no-match' | 'watchdog';
-  detail: string;
-  confidence?: number;
-}
+export type { DebugEvent };
 
 interface UseAdvancedSpeechRecognitionReturn {
   isListening: boolean;
@@ -300,7 +295,12 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
 
-    recognition.continuous = true;
+    // continuous=false: engine fires one final per utterance then ends.
+    // Avoids Chrome Mobile bug where continuous=true emits growing/duplicate
+    // result slots (e.g. ["hello", "hello hello", "hello hello"]) — each
+    // slot counted separately, inflating tallies by 2-3x.
+    // We restart on onend anyway, so behavior stays "always listening".
+    recognition.continuous = false;
     recognition.interimResults = true;
     // Prefer user's configured lang, fall back to browser locale, then en-US.
     recognition.lang = recognitionLangRef.current
@@ -328,6 +328,12 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
       }
     };
 
+    // Per-instance dedupe: track which result indices already counted.
+    // Chrome Mobile sometimes re-emits onresult with the same final result
+    // index after we've processed it (because a new interim appeared at a
+    // later index). Without this guard we'd double-count.
+    const processedFinalIndices = new Set<number>();
+
     recognition.onresult = (event: any) => {
       lastResultAtRef.current = Date.now();
       everReceivedResultRef.current = true;
@@ -341,6 +347,8 @@ export function useAdvancedSpeechRecognition(): UseAdvancedSpeechRecognitionRetu
         const conf = (typeof rawConf === 'number' && rawConf > 0) ? rawConf : 0.85;
 
         if (result.isFinal) {
+          if (processedFinalIndices.has(i)) continue;
+          processedFinalIndices.add(i);
           finalTranscriptRef.current += t;
           pushDebug('result-final', `"${t.trim()}"`, conf);
           processTranscript(t, conf);

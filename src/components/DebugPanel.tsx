@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Bug, Download, Trash2, Volume2 } from 'lucide-react';
 import { useTally } from '../context/TallyContext';
-import type { DebugEvent } from '../hooks/useAdvancedSpeechRecognition';
+import type { DebugEvent } from '../hooks/engines/types';
 
 interface DebugPanelProps {
   confidence: number;
@@ -12,6 +12,8 @@ interface DebugPanelProps {
   sessionRecordingSize: number;
   downloadSessionAudio: () => void;
   clearSessionAudio: () => void;
+  engineStatus?: string;
+  modelLoadProgress?: number;
 }
 
 const kindStyles: Record<DebugEvent['kind'], { color: string; label: string }> = {
@@ -25,6 +27,8 @@ const kindStyles: Record<DebugEvent['kind'], { color: string; label: string }> =
   'end':                { color: 'text-orange-500', label: 'END' },
   'restart':            { color: 'text-purple-500', label: 'RESTART' },
   'watchdog':           { color: 'text-pink-500',   label: 'WATCHDOG' },
+  'engine':             { color: 'text-indigo-500', label: 'ENGINE' },
+  'model-load':         { color: 'text-violet-500', label: 'MODEL' },
 };
 
 const formatTime = (ts: number) => {
@@ -46,9 +50,12 @@ const DebugPanel: React.FC<DebugPanelProps> = ({
   sessionRecordingSize,
   downloadSessionAudio,
   clearSessionAudio,
+  engineStatus,
+  modelLoadProgress,
 }) => {
   const [open, setOpen] = useState(false);
   const { state, dispatch } = useTally();
+  const engine = state.settings.engine;
   const threshold = state.settings.confidenceThreshold;
   const transcript = state.currentTranscript;
   const recordSessionAudio = state.settings.recordSessionAudio;
@@ -70,7 +77,10 @@ const DebugPanel: React.FC<DebugPanelProps> = ({
           <Bug className="h-5 w-5 text-muted-foreground" />
           <span className="font-semibold text-card-foreground">Debug</span>
           <span className="text-xs text-muted-foreground">
-            {state.isListening ? 'live' : 'idle'} · conf {confidence.toFixed(2)} / threshold {threshold.toFixed(2)} · {debugEvents.length} events
+            {engine} · {engineStatus || (state.isListening ? 'live' : 'idle')}
+            {typeof modelLoadProgress === 'number' && modelLoadProgress < 1 &&
+              ` · loading ${Math.round(modelLoadProgress * 100)}%`}
+            {' · '}conf {confidence.toFixed(2)} / threshold {threshold.toFixed(2)} · {debugEvents.length} events
           </span>
         </div>
         <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>

@@ -14,6 +14,7 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
   const { dispatch, state } = useTally();
   const [isAnimating, setIsAnimating] = useState(false);
   const [recentChange, setRecentChange] = useState<'increase' | 'decrease' | null>(null);
+  const [recentDelta, setRecentDelta] = useState(0);
   const prevCount = React.useRef(word.count);
   
   // Calculate recent activity
@@ -23,12 +24,14 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
 
   useEffect(() => {
     if (word.count !== prevCount.current) {
+      const delta = word.count - prevCount.current;
       setIsAnimating(true);
-      setRecentChange(word.count > prevCount.current ? 'increase' : 'decrease');
-      
+      setRecentChange(delta > 0 ? 'increase' : 'decrease');
+      setRecentDelta(delta);
+
       const timer1 = setTimeout(() => setIsAnimating(false), 800);
       const timer2 = setTimeout(() => setRecentChange(null), 2000);
-      
+
       prevCount.current = word.count;
       return () => {
         clearTimeout(timer1);
@@ -170,7 +173,7 @@ const EnhancedTallyCard: React.FC<EnhancedTallyCardProps> = ({ word, index }) =>
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0, y: -10 }}
                 >
-                  {recentChange === 'increase' ? '+1' : '-1'}
+                  {recentDelta > 0 ? `+${recentDelta}` : recentDelta}
                 </motion.div>
               )}
             </AnimatePresence>

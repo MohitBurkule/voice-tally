@@ -162,6 +162,39 @@ const SettingsPage: React.FC = () => {
                 Higher values require more confident speech recognition
               </p>
             </div>
+
+            {/* Speech Recognition Engine */}
+            <div>
+              <label className="font-medium text-card-foreground block mb-2">
+                Speech Recognition Engine
+              </label>
+              <select
+                value={state.settings.engine}
+                onChange={(e) =>
+                  handleUpdateSettings({
+                    engine: e.target.value as typeof state.settings.engine,
+                  })
+                }
+                className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                <option value="webspeech">
+                  Web Speech API (default · online · free)
+                </option>
+                <option value="vosk">
+                  Vosk Kaldi (~40MB · offline · streaming · grammar-constrained)
+                </option>
+                <option value="whisper">
+                  Whisper-tiny (~75MB · offline · best quality · 3s chunks)
+                </option>
+                <option value="moonshine">
+                  Moonshine-tiny (mobile-optimized · offline · 2s chunks)
+                </option>
+              </select>
+              <p className="text-sm text-muted-foreground mt-1">
+                Vosk / Whisper / Moonshine download model weights on first start
+                and cache them. Stop and restart listening after switching engines.
+              </p>
+            </div>
           </div>
         </motion.div>
 
