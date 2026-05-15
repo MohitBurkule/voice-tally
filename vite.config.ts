@@ -6,6 +6,7 @@ import { VitePWA } from "vite-plugin-pwa";
 import { execSync } from "child_process";
 import pkg from "./package.json";
 import { seoConfig } from "./src/seo/seoConfig";
+import { sisterApps } from "./src/seo/sisterApps";
 
 // Build-time version: package.json version + short git SHA.
 // Fallback gracefully if git is unavailable (e.g. CI without history).
@@ -118,6 +119,13 @@ function transformIndexHtml(
     </ul>
     <h2>Related counters</h2>
     <ul>${otherLinks}</ul>
+    <h2>More apps from app.scot</h2>
+    <ul>${sisterApps
+      .map(
+        (a) =>
+          `<li><a href="${esc(a.url)}" rel="noopener">${esc(a.name)}</a> — ${esc(a.blurb)}</li>`,
+      )
+      .join("")}</ul>
     <p><em>This site requires JavaScript to run. Enable JavaScript or use the static info above.</em></p>
   </main>
 </noscript>

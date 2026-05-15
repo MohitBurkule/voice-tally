@@ -10,6 +10,7 @@ import EnhancedTallyCard from '../components/EnhancedTallyCard';
 import DebugPanel from '../components/DebugPanel';
 import Hints from '../components/Hints';
 import SEOFooter from '../components/SEOFooter';
+import SisterAppsFooter from '../components/SisterAppsFooter';
 
 const TallyPage: React.FC = () => {
   const { state, dispatch, undo, redo, canUndo, canRedo } = useTally();
@@ -356,6 +357,9 @@ const TallyPage: React.FC = () => {
             Using advanced speech recognition • Confidence threshold: {Math.round(state.settings.confidenceThreshold * 100)}%
           </motion.div>
         )}
+
+        {/* Backlinks to sibling apps on app.scot */}
+        <SisterAppsFooter />
 
         {/* SEO link cluster — small, muted, crawlable */}
         <SEOFooter />
