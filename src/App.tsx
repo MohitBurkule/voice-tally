@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { TallyProvider } from "./context/TallyContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Navbar from "./components/Navbar";
+import VersionBadge from "./components/VersionBadge";
 import TallyPage from "./pages/TallyPage";
 import SettingsPage from "./pages/SettingsPage";
 import HistoryPage from "./pages/HistoryPage";
@@ -83,6 +84,7 @@ const App = () => (
                 </Routes>
               </AnimatePresence>
             </div>
+            <VersionBadge />
           </BrowserRouter>
         </TallyProvider>
       </TooltipProvider>

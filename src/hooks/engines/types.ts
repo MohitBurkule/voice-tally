@@ -39,4 +39,9 @@ export interface UnifiedSpeechRecognition {
   // Engine-specific state (model loading progress, etc).
   engineStatus?: string;
   modelLoadProgress?: number; // 0-1, or undefined if no model
+  // Prefetch the engine's model weights into the browser cache so that the
+  // engine can run fully offline. No-op for engines that don't have a model
+  // (e.g. Web Speech).
+  prefetchModel?: () => Promise<void>;
+  modelCached?: boolean; // best-effort: has model finished loading at least once
 }

@@ -224,6 +224,10 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
     try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch (_) {}
   }, []);
 
+  const prefetchModel = useCallback(async () => {
+    await ensureTranscriber();
+  }, [ensureTranscriber]);
+
   return {
     isListening,
     transcript,
@@ -241,5 +245,7 @@ export function useMoonshineEngine(): UnifiedSpeechRecognition {
     clearSessionAudio: () => {},
     engineStatus,
     modelLoadProgress,
+    prefetchModel,
+    modelCached: !!transcriberRef.current,
   };
 }

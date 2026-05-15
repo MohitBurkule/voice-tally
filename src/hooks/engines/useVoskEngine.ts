@@ -207,6 +207,10 @@ export function useVoskEngine(): UnifiedSpeechRecognition {
     dispatch({ type: 'SET_TRANSCRIPT', payload: '' });
   }, [dispatch]);
 
+  const prefetchModel = useCallback(async () => {
+    await ensureModel();
+  }, [ensureModel]);
+
   return {
     isListening,
     transcript,
@@ -224,5 +228,7 @@ export function useVoskEngine(): UnifiedSpeechRecognition {
     clearSessionAudio: () => {},
     engineStatus,
     modelLoadProgress,
+    prefetchModel,
+    modelCached: !!modelRef.current,
   };
 }

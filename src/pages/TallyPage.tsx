@@ -7,6 +7,7 @@ import { useSpeechEngine } from '../hooks/engines/useSpeechEngine';
 import EnhancedStatusIndicator from '../components/EnhancedStatusIndicator';
 import EnhancedTallyCard from '../components/EnhancedTallyCard';
 import DebugPanel from '../components/DebugPanel';
+import Hints from '../components/Hints';
 
 const TallyPage: React.FC = () => {
   const { state, dispatch, undo, redo, canUndo, canRedo } = useTally();
@@ -129,6 +130,15 @@ const TallyPage: React.FC = () => {
           sessionRecordingSize={sessionRecordingSize}
           downloadSessionAudio={downloadSessionAudio}
           clearSessionAudio={clearSessionAudio}
+          engineStatus={engineStatus}
+          modelLoadProgress={modelLoadProgress}
+        />
+
+        {/* Context-aware hints — appears only when likely needed */}
+        <Hints
+          isListening={isListening}
+          browserSupports={browserSupportsSpeechRecognition}
+          error={error}
           engineStatus={engineStatus}
           modelLoadProgress={modelLoadProgress}
         />

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Trash2, Sun, Moon, Volume2, VolumeX, Save, X } from 'lucide-react';
 import { useTally } from '../context/TallyContext';
 import { TargetWord } from '../context/TallyContext';
+import EngineOfflineButton from '../components/EngineOfflineButton';
 
 const SettingsPage: React.FC = () => {
   const { state, dispatch } = useTally();
@@ -194,6 +195,9 @@ const SettingsPage: React.FC = () => {
                 Vosk / Whisper / Moonshine download model weights on first start
                 and cache them. Stop and restart listening after switching engines.
               </p>
+              <div className="mt-3">
+                <EngineOfflineButton />
+              </div>
             </div>
           </div>
         </motion.div>
