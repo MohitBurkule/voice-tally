@@ -157,6 +157,17 @@ const Hints: React.FC<HintsProps> = ({
         next time runs offline.
       </span>
     );
+  } else if (isListening) {
+    // Wake Lock keeps the screen on while listening, but the mic still
+    // stops if the user manually locks the phone or switches apps. Surface
+    // that caveat so it's not a surprise.
+    tone = 'info';
+    hint = (
+      <span>
+        Listening — screen kept awake. If you lock the phone or switch apps the
+        mic stops; install the Android APK for true background listening.
+      </span>
+    );
   }
 
   if (!hint) return null;

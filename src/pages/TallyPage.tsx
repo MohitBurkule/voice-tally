@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, RotateCcw, Undo, Redo, Settings, Zap } from 'lucide-react';
 import { useTally } from '../context/TallyContext';
 import { useSpeechEngine } from '../hooks/engines/useSpeechEngine';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { useSEO } from '../seo/SEOContext';
 import EnhancedStatusIndicator from '../components/EnhancedStatusIndicator';
 import EnhancedTallyCard from '../components/EnhancedTallyCard';
@@ -15,6 +16,10 @@ import SisterAppsFooter from '../components/SisterAppsFooter';
 const TallyPage: React.FC = () => {
   const { state, dispatch, undo, redo, canUndo, canRedo } = useTally();
   const seo = useSEO();
+
+  // Keep the screen on while listening — the only reliable way to stop
+  // mobile browsers from suspending the mic when the screen would lock.
+  useWakeLock(isListening);
   const {
     isListening,
     startListening,
