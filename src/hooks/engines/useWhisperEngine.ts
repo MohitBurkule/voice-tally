@@ -148,7 +148,7 @@ export function useWhisperEngine(): UnifiedSpeechRecognition {
       const transcriber = transcriberRef.current;
       const result = await transcriber(resampled);
       const rawText: string = result?.text?.trim?.() || '';
-      const maxRepeats = Math.max(2, Math.floor(CHUNK_SECONDS * 4));
+      const maxRepeats = Math.max(2, Math.floor(CHUNK_SECONDS * 6));
       const text = rawText ? capPerTokenRepeats(rawText, maxRepeats) : '';
       if (rawText && text !== rawText) {
         pushDebug('reject-no-match', `(repeat-loop capped: "${rawText}" → "${text}")`, 0);
